@@ -102,10 +102,11 @@
 
   toGrab({ pHand: 0, cHand: 1 });
   check('「ポン」の直後は勝ち負けの文字なし（実況が空・結果が未決）', Game.comm === '' && Game.outcome === '' && Game.pHand === 0 && Game.cHand === 1, 'comm="' + Game.comm + '"');
-  Game.tapItem('hammer', Game.ponT + 0.4);
+  Game.tapItem('hammer', Game.ponT + 0.55);
   check('道具を取った後に結果の実況が出る', Game.comm === COMM.hit, Game.comm);
-  check('反応の秒数が記録される（0.40 秒）と、ほめ言葉は「速い」', Math.abs(Game.pReact - 0.4) < 1e-9 && Game.pPraise === '速い', Game.pReact + ' ' + Game.pPraise);
-  check('ほめ言葉のしきい値（0.30 神速 / 0.40 速い / 0.55 いいね / 0.70 なし）', praiseOf(0.30) === '神速' && praiseOf(0.40) === '速い' && praiseOf(0.55) === 'いいね' && praiseOf(0.70) === '', '');
+  check('反応の秒数が記録される（0.55 秒）と、ほめ言葉は「速い」', Math.abs(Game.pReact - 0.55) < 1e-9 && Game.pPraise === '速い', Game.pReact + ' ' + Game.pPraise);
+  check('ほめ言葉のしきい値（人間の速さ：0.45 神速 / 0.60 速い / 0.80 いいね / 0.90 なし）', praiseOf(0.45) === '神速' && praiseOf(0.55) === '速い' && praiseOf(0.60) === '速い' && praiseOf(0.75) === 'いいね' && praiseOf(0.80) === 'いいね' && praiseOf(0.90) === '', '');
+  check('人間の目安（良い人 0.60 / ふつう 0.75 / ゆっくり 0.90 秒）が「速い」「いいね」「なし」に分かれる', praiseOf(0.60) === '速い' && praiseOf(0.75) === 'いいね' && praiseOf(0.90) === '');
 
   // --- 手を選ぶまで待つ。選んだ瞬間から「ジャン」が始まる ---
   fresh(3);
@@ -243,16 +244,21 @@
     let sum = 0, mn = 9, mx = 0, mis = 0; const K = 3000;
     for (let k = 0; k < K; k++) { Game.hist = []; Game.pon(0); sum += Game.cReact; mn = Math.min(mn, Game.cReact); mx = Math.max(mx, Game.cReact); if (Game.cMistake) mis++; }
     info(o.name + '：反応 平均 ' + (sum / K).toFixed(2) + ' 秒（' + mn.toFixed(2) + '〜' + mx.toFixed(2) + '）、取り違え ' + pct(mis / K));
-    check(o.name + 'の反応の平均は設定の ' + o.mean + ' 秒に近く、ばらつきがあり、タイムアウトより前に動く', Math.abs(sum / K - o.mean) < 0.03 && mx - mn > 0.15 && mx < CFG.grabTimeout, '');
+    check(o.name + 'の反応の平均は設定の ' + o.mean + ' 秒に近く（下限で切るぶん少し遅くなる）、ばらつきがあり、タイムアウトより前に動く', sum / K >= o.mean - 0.03 && sum / K < o.mean + 0.10 && mx - mn > 0.25 && mx < CFG.grabTimeout, '');
+    check(o.name + 'は人間を超えて速くならない（下限 ' + o.min + ' 秒 ≥ 0.40 秒、実際の最速も 0.40 秒以上）', o.min >= 0.40 && mn >= 0.40 - 1e-9, 'min=' + mn.toFixed(3));
   }
   const meanOrder = CFG.opps.map(o => o.mean);
-  check('回戦が進むほど相手は速い（反応の平均が小さくなっていく・同じは可）', meanOrder.every((v, i) => i === 0 || v <= meanOrder[i - 1]), meanOrder.join(' > '));
+  check('回戦が進むほど相手は速い（反応の平均が小さくなっていく）。決勝がいちばん速い', meanOrder.every((v, i) => i === 0 || v < meanOrder[i - 1]) && meanOrder[4] === Math.min(...meanOrder), meanOrder.join(' > '));
+  const minOrder = CFG.opps.map(o => o.min);
+  check('下限も回戦が進むほど小さくなる（速い回が出やすくなる）', minOrder.every((v, i) => i === 0 || v <= minOrder[i - 1]), minOrder.join(' >= '));
 
   // ---------- 5. ボットで勝ち抜き戦 ----------
-  head('5. ボットで勝ち抜き戦');
+  head('5. 人間モデルのボットで勝ち抜き戦');
+  // 人間モデル：反応 = 正規分布（平均 mean・標準偏差 sd）を min（0.35 秒）以上に切ったもの。mis の確率で道具を取り違える
   function playTournament(bot, seed) {
     Game.reset(seed); Game.begin(0);
     const brng = mulberry32(seed * 7919 + 13);
+    const gauss = () => Math.sqrt(-2 * Math.log(1 - brng())) * Math.cos(2 * Math.PI * brng());
     let n = 0;
     while (Game.mode === 'match' && n++ < 20000) {
       if (Game.phase === 'wait') {
@@ -260,46 +266,48 @@
         if (bot.read) { const e = habitHandOf(Game.opp, Game.hist); if (e != null) h = winHand(e); }
         if (h == null) h = Math.floor(brng() * 3);
         Game.selectHand(h, Game.time);
-      } else if (Game.phase === 'grab' && !Game.pItem && bot.item(Game.rps)) {
-        const react = Math.max(0.15, bot.react + (brng() + brng() + brng() - 1.5) * bot.jitter);
-        Game.tapItem(bot.item(Game.rps), Game.ponT + react);
+      } else if (Game.phase === 'grab' && !Game.pItem) {
+        let item = bot.item ? bot.item(Game.rps) : (Game.rps === 'win' ? 'hammer' : 'helmet');
+        if (!bot.item && brng() < bot.mis) item = item === 'hammer' ? 'helmet' : 'hammer';   // 勝ち負けを見誤る
+        const react = Math.max(bot.min, bot.mean + gauss() * bot.sd);
+        Game.tapItem(item, Game.ponT + react);
       } else Game.advanceTo(Game.endT);
     }
     Game.events.length = 0;
     return { champ: Game.tourney === 'champion', out: Game.oppIdx, over: Game.mode === 'over' };
   }
-  const judge = rps => rps === 'win' ? 'hammer' : 'helmet';
   const bots = {
-    read05: { name: '正しく判断 0.5 秒＋クセを読む', read: true, item: judge, react: 0.5, jitter: 0.1 },
-    rand05: { name: '正しく判断 0.5 秒・手はランダム', read: false, item: judge, react: 0.5, jitter: 0.1 },
-    read07: { name: '正しく判断 0.7 秒＋クセを読む', read: true, item: judge, react: 0.7, jitter: 0.1 },
-    rand07: { name: '正しく判断 0.7 秒・手はランダム', read: false, item: judge, react: 0.7, jitter: 0.1 },
-    ham03: { name: 'いつもハンマー 0.3 秒・手はランダム', read: false, item: () => 'hammer', react: 0.3, jitter: 0.05 },
-    hamRead: { name: 'いつもハンマー 0.3 秒＋クセを読む', read: true, item: () => 'hammer', react: 0.3, jitter: 0.05 }
+    good:  { name: '速い人（0.60 秒・ばらつき 0.10・見誤り 3%）＋クセを読む', read: true,  mean: 0.60, sd: 0.10, mis: 0.03, min: 0.35 },
+    avg:   { name: 'ふつうの人（0.75 秒・ばらつき 0.12・見誤り 5%）＋クセを読む', read: true,  mean: 0.75, sd: 0.12, mis: 0.05, min: 0.35 },
+    slow:  { name: 'ゆっくりな人（0.90 秒・ばらつき 0.15・見誤り 7%）＋クセを読む', read: true,  mean: 0.90, sd: 0.15, mis: 0.07, min: 0.35 },
+    avgR:  { name: 'ふつうの人（0.75 秒）・クセを読まない（手はランダム）', read: false, mean: 0.75, sd: 0.12, mis: 0.05, min: 0.35 },
+    ham03: { name: 'いつもハンマー 0.3 秒・手はランダム', read: false, item: () => 'hammer', mean: 0.30, sd: 0.05, min: 0.15 },
+    hamRead: { name: 'いつもハンマー 0.3 秒＋クセを読む', read: true, item: () => 'hammer', mean: 0.30, sd: 0.05, min: 0.15 }
   };
-  const N = 500, tour = {};
+  const N = 500, tour = {}, firstWin = {}, early = {};
   for (const k in bots) {
-    const dist = [0, 0, 0, 0, 0], ch = { v: 0 }; let ok = 0;
+    const dist = [0, 0, 0, 0, 0]; let ch = 0, ok = 0;
     for (let s = 1; s <= N; s++) {
       const rr = playTournament(bots[k], s);
       if (rr.over) ok++;
-      if (rr.champ) ch.v++; else dist[rr.out]++;
+      if (rr.champ) ch++; else dist[rr.out]++;
     }
-    tour[k] = ch.v / N;
-    info(bots[k].name + '：優勝 ' + ch.v + ' / ' + N + '（' + pct(ch.v / N) + '）　敗退 1回戦 ' + dist[0] + ' / 2回戦 ' + dist[1] + ' / 3回戦 ' + dist[2] + ' / 4回戦 ' + dist[3] + ' / 決勝 ' + dist[4]);
+    tour[k] = ch / N; firstWin[k] = 1 - dist[0] / N; early[k] = (dist[0] + dist[1]) / N;
+    info(bots[k].name + '：優勝 ' + ch + ' / ' + N + '（' + pct(ch / N) + '）　敗退 1回戦 ' + dist[0] + ' / 2回戦 ' + dist[1] + ' / 3回戦 ' + dist[2] + ' / 4回戦 ' + dist[3] + ' / 決勝 ' + dist[4]);
     if (ok !== N) check('全部の勝ち抜き戦が終わる（' + k + '）', false);
   }
-  check('正しく判断 0.5 秒＋クセを読むボットは優勝することがある（20〜50%）', tour.read05 >= 0.20 && tour.read05 <= 0.50, pct(tour.read05));
-  check('クセを読むと読まないより優勝しやすい（0.5 秒）', tour.read05 > tour.rand05, pct(tour.read05) + ' > ' + pct(tour.rand05));
-  check('0.5 秒でクセを読まないボットは優勝がまれ（20% 未満）', tour.rand05 < 0.20, pct(tour.rand05));
-  check('0.7 秒のボット（クセを読んでも）はまれにしか優勝しない（10% 未満）', tour.read07 < 0.10 && tour.rand07 < 0.10, pct(tour.read07) + ' / ' + pct(tour.rand07));
+  check('速い人（0.60 秒＋読み）は半分以上〜7 割ほど優勝する（50〜75%）', tour.good >= 0.50 && tour.good <= 0.75, pct(tour.good));
+  check('ふつうの人（0.75 秒＋読み）は 2〜4 割優勝する（20〜35%）', tour.avg >= 0.20 && tour.avg <= 0.35, pct(tour.avg));
+  check('ふつうの人は、たいてい 3 回戦以降まで進む（1・2 回戦での敗退が 2 割未満）', early.avg < 0.20, '1・2 回戦敗退 ' + pct(early.avg));
+  check('ゆっくりな人（0.90 秒＋読み）は 1 回戦を 7 割以上勝ち上がる', firstWin.slow >= 0.70, pct(firstWin.slow));
+  check('ゆっくりな人の優勝はまれ（10% 以下）', tour.slow <= 0.10, pct(tour.slow));
+  check('速さに意味がある（速い人 > ふつうの人 > ゆっくりな人）', tour.good > tour.avg + 0.2 && tour.avg > tour.slow + 0.1, pct(tour.good) + ' > ' + pct(tour.avg) + ' > ' + pct(tour.slow));
+  check('クセを読むことに意味がある（ふつうの人：読む 優勝率が読まないの 3 倍以上）', tour.avg >= tour.avgR * 3 && tour.avg > tour.avgR + 0.10, pct(tour.avg) + ' vs ' + pct(tour.avgR));
   check('いつもハンマー（手はランダム）のボットはほぼ優勝できない（5% 未満）', tour.ham03 < 0.05, pct(tour.ham03));
-  info('参考：いつもハンマーでもクセを読んで勝てる手を出すと優勝 ' + pct(tour.hamRead) + '（判断しなくても、読みで勝ち役が増えるぶん通る。正しく判断＋読み ' + pct(tour.read05) + ' より低い）');
-  check('クセを読むだけのいつもハンマーより、正しく判断して読むボットのほうが優勝しやすい', tour.read05 > tour.hamRead, pct(tour.read05) + ' > ' + pct(tour.hamRead));
-  check('0.5 秒のボットのほうが 0.7 秒より優勝しやすい（速さに意味がある）', tour.read05 > tour.read07 + 0.1, pct(tour.read05) + ' vs ' + pct(tour.read07));
+  check('クセを読むだけのいつもハンマーも、速い人より優勝しにくい（判断に意味がある）', tour.hamRead < tour.good, pct(tour.hamRead) + ' < ' + pct(tour.good));
 
   // 同じシードで同じ勝ち抜き戦になる
-  const sig = s => { playTournament(bots.read05, s); return Game.oppIdx + '/' + Game.score.p + '-' + Game.score.c + '/' + Game.hist.map(h => h.p + '' + h.c).join(','); };
+  const sig = s => { playTournament(bots.avg, s); return Game.oppIdx + '/' + Game.score.p + '-' + Game.score.c + '/' + Game.hist.map(h => h.p + '' + h.c).join(','); };
   check('同じシードなら同じ勝ち抜き戦になる（再現できる）', sig(42) === sig(42) && sig(42) !== sig(43), sig(42));
 
   const sum2 = document.createElement('h2');

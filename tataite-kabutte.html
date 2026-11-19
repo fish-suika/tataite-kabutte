@@ -153,19 +153,19 @@ const CFG = {
   resultHold: 1.2,    // 決着を見せておく間
   // --- 試合 ---
   winPoints: 2,       // 先取の本数（長すぎれば 1 にする）
-  // --- 反応の秒数のほめ言葉（以下ならその言葉。小さい順）---
-  praise: [[0.35, '神速'], [0.45, '速い'], [0.60, 'いいね']],
+  // --- 反応の秒数のほめ言葉（以下ならその言葉。小さい順。人間の「見て・判断して・タップ」の目安に合わせる）---
+  praise: [[0.45, '神速'], [0.60, '速い'], [0.80, 'いいね']],
   // --- 相手（回戦の順。最後が決勝）---
-  //  mean: 反応の平均 / spread: ばらつき（標準偏差）/ mistake: 取り違える確率 / min: これより速くは反応しない
+  //  mean: 反応の平均（人間が出せる速さ。min は 0.40 秒以上＝それより速くは反応しない） / spread: ばらつき（標準偏差。大きめにして、速さの差がそのまま勝ち負けにならないようにする）/ mistake: 取り違える確率 / min: これより速くは反応しない
   //  habit: ジャンケンのクセ { type, s: クセの強さ（その手を出す確率。外れたら 3 つから気まぐれ） }
   //    type: goo グーが多い / loser 前回負けた手に勝つ手 / repeat 同じ手を続ける / none ばらばら / counter こちらの前回の手に勝つ手
   //    s = 0.5 だと実際にクセの手が出る割合は約 67%
   opps: [
-    { name: '近所の小学生',     mean: 0.90, spread: 0.18, mistake: 0.12, min: 0.30, habit: { type: 'goo',     s: 0.5 }, taunt: 'へへーん！|ぼくの|勝ちー！' },
-    { name: '学級委員長',       mean: 0.70, spread: 0.14, mistake: 0.06, min: 0.30, habit: { type: 'loser',   s: 0.5 }, taunt: '練習不足ですよ。|出直して|きなさい。' },
-    { name: '体育の先生',       mean: 0.58, spread: 0.12, mistake: 0.02, min: 0.28, habit: { type: 'repeat',  s: 0.5 }, taunt: '反応が遅い！|腕立て|三十回だ！' },
-    { name: '商店街のおばあちゃん', mean: 0.50, spread: 0.10, mistake: 0,    min: 0.25, habit: { type: 'none',    s: 0 }, taunt: 'あらあら、|飴ちゃん食べて|元気だしなさい。' },
-    { name: '町内チャンピオン', mean: 0.47, spread: 0.10, mistake: 0,    min: 0.25, habit: { type: 'counter', s: 0.5 }, taunt: 'その程度では|町内の頂点には|届かんな。' }
+    { name: '近所の小学生',     mean: 0.98, spread: 0.24, mistake: 0.12, min: 0.50, habit: { type: 'goo',     s: 0.5 }, taunt: 'へへーん！|ぼくの|勝ちー！' },
+    { name: '学級委員長',       mean: 0.86, spread: 0.24, mistake: 0.09, min: 0.46, habit: { type: 'loser',   s: 0.5 }, taunt: '練習不足ですよ。|出直して|きなさい。' },
+    { name: '体育の先生',       mean: 0.75, spread: 0.24, mistake: 0.08, min: 0.43, habit: { type: 'repeat',  s: 0.5 }, taunt: '反応が遅い！|腕立て|三十回だ！' },
+    { name: '商店街のおばあちゃん', mean: 0.73, spread: 0.24, mistake: 0.08, min: 0.42, habit: { type: 'none',    s: 0 }, taunt: 'あらあら、|飴ちゃん食べて|元気だしなさい。' },
+    { name: '町内チャンピオン', mean: 0.58, spread: 0.24, mistake: 0.05, min: 0.40, habit: { type: 'counter', s: 0.5 }, taunt: 'その程度では|町内の頂点には|届かんな。' }
   ],
   overDelay: 0.5      // 勝ち抜き戦が終わってから結果を出すまで（UI 側。ロジックの resultHold のあと）
 };
