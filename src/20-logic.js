@@ -26,7 +26,7 @@ function praiseOf(sec) {
 // 実況の一言
 const COMM = {
   hit: '決まった！', guarded: 'ガード！', wrongHelmet: 'あれ？被っちゃった',
-  cpuHit: '叩かれた！', guard: 'ナイスガード！', foul: '反則！', cpuFoul: '相手の反則！', nothing: '…様子見'
+  cpuHit: '叩かれた！', guard: 'ナイスガード！', foul: 'おっと、反則です！', cpuFoul: '相手の反則！', nothing: '…様子見'
 };
 
 // 1 回の決着を決める純粋な関数（表の全部の行がここ）。時刻はすべて「ポン」からの秒数。

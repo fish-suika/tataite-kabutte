@@ -22,11 +22,11 @@ const CFG = {
   //    type: goo グーが多い / loser 前回負けた手に勝つ手 / repeat 同じ手を続ける / none ばらばら / counter こちらの前回の手に勝つ手
   //    s = 0.5 だと実際にクセの手が出る割合は約 67%
   opps: [
-    { name: '近所の小学生',     mean: 0.90, spread: 0.18, mistake: 0.12, min: 0.30, habit: { type: 'goo',     s: 0.5 } },
-    { name: '学級委員長',       mean: 0.70, spread: 0.14, mistake: 0.06, min: 0.30, habit: { type: 'loser',   s: 0.5 } },
-    { name: '体育の先生',       mean: 0.58, spread: 0.12, mistake: 0.02, min: 0.28, habit: { type: 'repeat',  s: 0.5 } },
-    { name: '商店街のおばあちゃん', mean: 0.50, spread: 0.10, mistake: 0,    min: 0.25, habit: { type: 'none',    s: 0 } },
-    { name: '町内チャンピオン', mean: 0.47, spread: 0.10, mistake: 0,    min: 0.25, habit: { type: 'counter', s: 0.5 } }
+    { name: '近所の小学生',     mean: 0.90, spread: 0.18, mistake: 0.12, min: 0.30, habit: { type: 'goo',     s: 0.5 }, taunt: 'へへーん！|ぼくの|勝ちー！' },
+    { name: '学級委員長',       mean: 0.70, spread: 0.14, mistake: 0.06, min: 0.30, habit: { type: 'loser',   s: 0.5 }, taunt: '練習不足ですよ。|出直して|きなさい。' },
+    { name: '体育の先生',       mean: 0.58, spread: 0.12, mistake: 0.02, min: 0.28, habit: { type: 'repeat',  s: 0.5 }, taunt: '反応が遅い！|腕立て|三十回だ！' },
+    { name: '商店街のおばあちゃん', mean: 0.50, spread: 0.10, mistake: 0,    min: 0.25, habit: { type: 'none',    s: 0 }, taunt: 'あらあら、|飴ちゃん食べて|元気だしなさい。' },
+    { name: '町内チャンピオン', mean: 0.47, spread: 0.10, mistake: 0,    min: 0.25, habit: { type: 'counter', s: 0.5 }, taunt: 'その程度では|町内の頂点には|届かんな。' }
   ],
   overDelay: 0.5      // 勝ち抜き戦が終わってから結果を出すまで（UI 側。ロジックの resultHold のあと）
 };

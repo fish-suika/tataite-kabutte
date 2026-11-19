@@ -7,11 +7,13 @@
 <style>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;overflow:hidden;background:#2a1a14;
-  font-family:"Hiragino Maru Gothic ProN","Yu Gothic UI","Meiryo",sans-serif;color:#fff;
+  font-family:"Hiragino Maru Gothic ProN","Yu Gothic UI","Meiryo","Noto Sans JP",sans-serif;color:#fff;
   user-select:none;-webkit-user-select:none;touch-action:none;
   word-break:auto-phrase;line-break:strict;text-wrap:balance}
 body{display:flex;align-items:center;justify-content:center}
+/* 文節の途中で改行しない：短い言葉は nb（折り返さない）、長い文は文節ごとに ph で包む */
 .nb{display:inline-block;white-space:nowrap}
+.ph{display:inline-block}
 
 #cv{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
 /* 遊ぶ場所の枠（縦9:16で中央）。単位は cqw（枠の幅の1%）。触れるのは下の絵 */
@@ -19,36 +21,84 @@ body{display:flex;align-items:center;justify-content:center}
   width:min(100vw,calc(100dvh*9/16));aspect-ratio:9/16;pointer-events:none}
 
 /* タイトル */
-#title{position:absolute;left:5cqw;right:5cqw;top:24cqw;z-index:20;text-align:center;
+#title{position:absolute;left:5cqw;right:5cqw;top:26cqw;z-index:20;text-align:center;
   display:flex;flex-direction:column;align-items:center;gap:3cqw}
 #title.hide{display:none}
-#title .t1{font-size:4.6cqw;font-weight:bold;color:#fff;background:#e23b3b;border-radius:5cqw;padding:.8cqw 4.5cqw;letter-spacing:.4cqw;box-shadow:0 .8cqw 0 #8f1f1f}
+#title .t1{font-size:4.6cqw;font-weight:bold;color:#fff;background:#e23b3b;border-radius:5cqw;padding:.8cqw 4.5cqw;letter-spacing:.4cqw;box-shadow:0 .8cqw 0 #8f1f1f;white-space:nowrap}
 #title .t2{font-size:12cqw;font-weight:900;line-height:1.15;color:#ffd23f;
   -webkit-text-stroke:1.4cqw #7a1a1a;paint-order:stroke fill;text-shadow:0 1.4cqw 0 #7a1a1a,0 2.2cqw 3cqw #0008}
-#title .t4{margin-top:3cqw;font-size:6cqw;font-weight:bold;color:#fff;background:#e0562a;border-radius:6cqw;
+#title .t4{margin-top:3cqw;font-size:6cqw;font-weight:bold;color:#fff;background:#e0562a;border-radius:6cqw;white-space:nowrap;
   padding:2cqw 8cqw;box-shadow:0 1.2cqw 0 #8f2f12;animation:blink 1.1s ease-in-out infinite}
 @keyframes blink{50%{transform:scale(1.07)}}
 
-/* 結果 */
-#result{position:absolute;left:7cqw;right:7cqw;top:30cqw;z-index:30;padding:5cqw 5.5cqw;
-  background:#fff7e6f2;color:#4a2a10;border:.8cqw solid #e23b3b;border-radius:4cqw;
-  box-shadow:0 2cqw 0 #00000055,0 3cqw 6cqw #0008;
-  display:none;flex-direction:column;align-items:stretch;gap:2cqw;text-align:center;pointer-events:auto}
-#result.show{display:flex;animation:pop .3s cubic-bezier(.3,1.5,.5,1)}
-#result.wait{pointer-events:none}
+/* 結果（優勝は賞状、敗退はトーナメント表）。はみ出すときは safe center で上から読める */
+#result{position:absolute;inset:0;z-index:30;display:none;flex-direction:column;align-items:center;
+  justify-content:safe center;overflow:auto;padding:4.5cqw 5cqw 5cqw;gap:2.6cqw;pointer-events:auto;touch-action:pan-y;
+  background:rgba(60,12,12,.38);-webkit-overflow-scrolling:touch}
+#result.show{display:flex;animation:fadein .3s ease-out}
+#result.wait .btn,#result.wait .xbtn{pointer-events:none}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
 @keyframes pop{from{transform:scale(.7) rotate(-2deg);opacity:0}to{transform:none;opacity:1}}
-#result .hd{font-size:8cqw;font-weight:900;color:#e23b3b;line-height:1.2;padding-bottom:1.6cqw;border-bottom:.5cqw solid #e23b3b88}
-#result .sub{font-size:4.4cqw;color:#7a4a22;min-height:5.6cqw}
-#result .ln{display:flex;justify-content:space-between;align-items:baseline;font-size:4.4cqw;
-  border-bottom:.3cqw dashed #7a4a2266;padding-bottom:1cqw}
-#result .ln span:first-child{color:#7a4a22}
-#result .ln b{font-size:5cqw;color:#4a2a10}
-#rBest{font-size:3.8cqw;color:#7a4a22;min-height:5cqw}
-.row{display:flex;gap:3cqw;align-items:center;width:100%;margin-top:1cqw}
-.btn{border:0;border-radius:3.6cqw;font:inherit;font-weight:bold;color:#fff;cursor:pointer;
+#result>*{flex:none;width:100%}
+.hide{display:none!important}
+.dbg *{animation:none!important}
+
+/* 賞状 */
+.cert{position:relative;text-align:center;color:#5a2a10;background:#fffbea;border:1.6cqw double #b8860b;
+  box-shadow:0 2cqw 0 #00000044,0 3cqw 6cqw #0008;padding:4cqw 3cqw 4.4cqw;animation:pop .45s cubic-bezier(.3,1.5,.5,1)}
+.cert::before{content:"";position:absolute;inset:1.2cqw;border:.4cqw solid #e23b3b99;pointer-events:none}
+.cert .c-top{font-size:5.4cqw;letter-spacing:3cqw;padding-left:3cqw;font-weight:bold;color:#7a1a1a}
+.cert .c-big{font-size:25cqw;font-weight:900;line-height:1.05;color:#ffc21a;white-space:nowrap;
+  -webkit-text-stroke:1.2cqw #7a1a1a;paint-order:stroke fill;text-shadow:0 1.2cqw 0 #7a1a1a}
+.cert .c-sub{font-size:5.6cqw;font-weight:bold;color:#7a1a1a;margin-top:1cqw}
+.cert .c-line{margin-top:3cqw;font-size:4.6cqw;display:flex;justify-content:center;align-items:baseline;gap:2cqw;white-space:nowrap}
+.cert .c-line b{font-size:8.4cqw;color:#e23b3b}
+.cert .c-line i{font-style:normal;font-weight:bold;color:#b8860b;font-size:5cqw}
+.cert .seal{position:absolute;right:3.4cqw;top:3cqw;width:11cqw;height:11cqw;border-radius:50%;border:.8cqw solid #d22;color:#d22;
+  display:grid;place-items:center;font-size:4.6cqw;font-weight:900;transform:rotate(-12deg);background:#fff0;line-height:1;opacity:.85}
+
+/* トーナメント表 */
+.bracket{background:#fff7e6;border:.8cqw solid #e23b3b;border-radius:3.5cqw;padding:3cqw 4cqw 3.4cqw;color:#4a2a10;
+  box-shadow:0 2cqw 0 #00000044,0 3cqw 6cqw #0008;animation:pop .45s cubic-bezier(.3,1.5,.5,1)}
+.b-hd{font-size:7.4cqw;font-weight:900;color:#e23b3b;text-align:center;line-height:1.2;white-space:nowrap}
+.b-tt{font-size:3.4cqw;text-align:center;color:#7a4a22;margin-top:.4cqw;white-space:nowrap}
+.b-rows{list-style:none;margin:2.4cqw 0 0;padding:0;position:relative}
+.b-rows::before{content:"";position:absolute;left:2.6cqw;top:3.6cqw;bottom:3.6cqw;width:.7cqw;background:#c9a27a;border-radius:1cqw}
+.b-rows li{display:flex;align-items:center;gap:2.4cqw;height:7.4cqw;font-size:4.2cqw;position:relative;white-space:nowrap;border-radius:2cqw;padding-right:2cqw;color:#9a8a76}
+.b-rows .dot{position:relative;z-index:1;flex:none;width:5.6cqw;height:5.6cqw;border-radius:50%;border:.5cqw solid #b9a98c;background:#eee6d6;display:grid;place-items:center;font-size:3.2cqw;font-weight:900;line-height:1;color:#fff}
+.b-rows .rl{width:12.4cqw;font-weight:bold;flex:none}
+.b-rows .rn{flex:1;overflow:hidden}
+.b-rows .rs{font-weight:bold;font-size:3.4cqw}
+.b-rows li.ok{color:#4a2a10}
+.b-rows li.ok .dot{background:#ffc21a;border-color:#b8860b}
+.b-rows li.ok .rs{color:#b8860b}
+.b-rows li.lost{color:#7a1a1a;background:#ffe0dc}
+.b-rows li.lost .dot{background:#e23b3b;border-color:#8f1f1f}
+.b-rows li.lost .rs{color:#e23b3b}
+.taunt{display:flex;align-items:center;gap:3cqw;margin-top:2.8cqw}
+#oppIcon{width:21cqw;height:21cqw;flex:none;border-radius:50%;background:#ffe7bd;border:.7cqw solid #7a4a22}
+.bubble{position:relative;flex:1;background:#fff;border:.6cqw solid #7a4a22;border-radius:3cqw;padding:2cqw 3cqw;font-size:4.2cqw;line-height:1.45;text-align:left;color:#4a2a10}
+.bubble::before{content:"";position:absolute;left:-2.6cqw;top:50%;margin-top:-1.8cqw;border:1.8cqw solid transparent;border-right:2.4cqw solid #7a4a22;border-left:0}
+.bubble::after{content:"";position:absolute;left:-1.6cqw;top:50%;margin-top:-1.4cqw;border:1.4cqw solid transparent;border-right:2cqw solid #fff;border-left:0}
+.bubble .who{display:block;font-size:3cqw;color:#9a6a3a;white-space:nowrap}
+
+/* 数字 */
+.tiles{display:flex;gap:2cqw}
+.tile{flex:1;background:#fff7e6;border:.5cqw solid #c9a27a;border-radius:2.6cqw;padding:1.6cqw 1cqw 1.8cqw;text-align:center;color:#4a2a10;box-shadow:0 1cqw 0 #00000033}
+.tile>span{display:block;font-size:3.2cqw;color:#7a4a22;white-space:nowrap}
+.tile b{display:block;font-size:5.8cqw;white-space:nowrap}
+#rBest .ph{margin:0 1.4cqw}
+#rBest{font-size:3.8cqw;color:#fff;text-align:center;text-shadow:0 .3cqw 1cqw #000a;min-height:5cqw}
+.row{display:flex;gap:3cqw;align-items:center;margin-top:.4cqw}
+.btn{border:0;border-radius:3.6cqw;font:inherit;font-weight:bold;color:#fff;cursor:pointer;white-space:nowrap;
   background:linear-gradient(#ff8a3d,#e0562a);box-shadow:0 1.2cqw 0 #8f2f12;touch-action:manipulation}
 .btn:active{transform:translateY(.8cqw);box-shadow:0 .4cqw 0 #8f2f12}
-#retry{flex:1;height:14cqw;font-size:5.8cqw}
+#retry{flex:1;height:14cqw;font-size:6cqw}
+.xwrap{display:flex;justify-content:center}
+.xbtn{display:inline-flex;align-items:center;gap:1.4cqw;border:0;border-radius:99cqw;background:#15171a;color:#fff;font:inherit;font-weight:bold;
+  font-size:3.8cqw;padding:1.7cqw 4.4cqw;cursor:pointer;white-space:nowrap;opacity:.92;touch-action:manipulation}
+.xbtn:active{opacity:.7}
+.xbtn .xm{font-family:Arial,sans-serif;font-weight:900;font-size:4.4cqw;line-height:1}
 </style>
 </head>
 <body>
@@ -60,15 +110,30 @@ body{display:flex;align-items:center;justify-content:center}
     <div class="t4">タップで スタート</div>
   </div>
   <div id="result">
-    <div class="hd" id="rHead"></div>
-    <div class="sub" id="rSub"></div>
-    <div class="ln"><span>最速の反応</span><b id="rFast"></b></div>
-    <div class="ln"><span>叩いた回数</span><b><span id="rHits">0</span> 回</b></div>
-    <div class="ln"><span>反則の回数</span><b><span id="rFouls">0</span> 回</b></div>
-    <div id="rBest"></div>
-    <div class="row">
-      <button id="retry" class="btn">もう一回</button>
+    <div class="cert hide" id="cert">
+      <div class="c-top">賞状</div>
+      <div class="c-big">優勝</div>
+      <div class="c-sub"><span class="ph">町内</span> <span class="ph">叩いて被って大会</span></div>
+      <div class="c-line"><span>最速の反応</span><b id="cFast"></b><i id="cPraise"></i></div>
+      <div class="seal">町内<br>会</div>
     </div>
+    <div class="bracket hide" id="bracket">
+      <div class="b-hd" id="bHead"></div>
+      <div class="b-tt">町内 叩いて被って大会　トーナメント</div>
+      <ol class="b-rows" id="bRows"></ol>
+      <div class="taunt">
+        <canvas id="oppIcon" width="160" height="160"></canvas>
+        <div class="bubble"><span class="who" id="tWho"></span><span id="tText"></span></div>
+      </div>
+    </div>
+    <div class="tiles">
+      <div class="tile"><span>最速の反応</span><b id="rFast"></b></div>
+      <div class="tile"><span>叩いた回数</span><b><span id="rHits">0</span> 回</b></div>
+      <div class="tile"><span>反則の回数</span><b><span id="rFouls">0</span> 回</b></div>
+    </div>
+    <div id="rBest"></div>
+    <div class="row"><button id="retry" class="btn">もう一回</button></div>
+    <div class="xwrap"><button id="share" class="xbtn"><span class="xm">X</span><span>で シェア</span></button></div>
   </div>
 </div>
 <script>
