@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-<title>叩いて被ってジャンケンポン（仮）</title>
+<title>叩いて被って五人抜き</title>
 <style>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;overflow:hidden;background:#2a1a14;
@@ -106,7 +106,7 @@ body{display:flex;align-items:center;justify-content:center}
 <div id="stage">
   <div id="title">
     <div class="t1">町内の 叩いて被って大会</div>
-    <div class="t2"><span class="nb">叩いて</span><span class="nb">被って</span><span class="nb">ジャンケンポン</span></div>
+    <div class="t2"><span class="nb">叩いて</span><span class="nb">被って</span><span class="nb">五人抜き</span></div>
     <div class="t4">タップで スタート</div>
   </div>
   <div id="result">
@@ -1453,7 +1453,7 @@ let shareFile = null, shareBlobWait = false;
 
 function resultLabel() { return Game.tourney === 'champion' ? '優勝' : roundLabel(Game.oppIdx) + '敗退'; }
 function shareText() {
-  return '叩いて被ってジャンケンポン ' + resultLabel() + (Game.fastest != null ? '／最速' + Game.fastest.toFixed(2) + '秒' : '');
+  return '叩いて被って五人抜き ' + resultLabel() + (Game.fastest != null ? '／最速' + Game.fastest.toFixed(2) + '秒' : '');
 }
 function isMobileDevice() {
   const ua = navigator.userAgent || '';
@@ -1474,7 +1474,7 @@ function makeCard() {
     }
     g.fillStyle = '#ffd23f'; g.fillRect(0, 48, 1200, 6);
     txt('町内　叩いて被って大会', 60, 108, 40, '#7a1a1a', { align: 'left' });
-    txt('叩いて被ってジャンケンポン', 60, 168, 58, '#e23b3b', { align: 'left', stroke: '#fff', sw: 8 });
+    txt('叩いて被って五人抜き', 60, 168, 58, '#e23b3b', { align: 'left', stroke: '#fff', sw: 8 });
     // 結果
     if (champ) {
       txt('優勝！', 60, 318, 176, '#ffc21a', { align: 'left', stroke: '#7a1a1a', sw: 26 });

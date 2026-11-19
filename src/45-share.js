@@ -4,7 +4,7 @@ let shareFile = null, shareBlobWait = false;
 
 function resultLabel() { return Game.tourney === 'champion' ? '優勝' : roundLabel(Game.oppIdx) + '敗退'; }
 function shareText() {
-  return '叩いて被ってジャンケンポン ' + resultLabel() + (Game.fastest != null ? '／最速' + Game.fastest.toFixed(2) + '秒' : '');
+  return '叩いて被って五人抜き ' + resultLabel() + (Game.fastest != null ? '／最速' + Game.fastest.toFixed(2) + '秒' : '');
 }
 function isMobileDevice() {
   const ua = navigator.userAgent || '';
@@ -25,7 +25,7 @@ function makeCard() {
     }
     g.fillStyle = '#ffd23f'; g.fillRect(0, 48, 1200, 6);
     txt('町内　叩いて被って大会', 60, 108, 40, '#7a1a1a', { align: 'left' });
-    txt('叩いて被ってジャンケンポン', 60, 168, 58, '#e23b3b', { align: 'left', stroke: '#fff', sw: 8 });
+    txt('叩いて被って五人抜き', 60, 168, 58, '#e23b3b', { align: 'left', stroke: '#fff', sw: 8 });
     // 結果
     if (champ) {
       txt('優勝！', 60, 318, 176, '#ffc21a', { align: 'left', stroke: '#7a1a1a', sw: 26 });
