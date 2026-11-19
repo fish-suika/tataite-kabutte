@@ -357,12 +357,10 @@ function drawHands(nowT) {
     drawHandBadge(Game.cHand, c.x, c.y, c.size * sc, 1, true);
     drawHandBadge(Game.pHand, m.x, m.y, m.size * sc, 1, true);
   } else {
-    // 「ジャン」「ケン」では両方がこぶしでぽんぽん上下する。待っているときは？
-    const pump = inCall ? Math.abs(Math.sin((nowT - Game.phaseT0) * 7.5)) * 3 : 0;
-    if (inCall) drawHandBadge(0, c.x, c.y - pump * (Game.callIdx + 1) * 0.5, c.size * 0.95, 1, false);
-    else drawUnknown(c.x, c.y, c.size, nowT);
-    if ((inCall || (Game.mode === 'match' && Game.phase === 'ready')) && Game.chosen != null) drawHandBadge(Game.chosen, m.x, m.y - pump * 0.6, m.size * 0.95, 0.55, false);
-    else drawUnknown(m.x, m.y, m.size * 0.9, nowT + 1);
+    // 「ジャン」「ケン」「あいこで」の間も手の形は出さない（ポン／しょ で両方同時に出る）。？の丸が拍に合わせてはねる
+    const hop = inCall ? Math.abs(Math.sin((nowT - Game.phaseT0) * 7.5)) * 2.2 : 0;
+    drawUnknown(c.x, c.y - hop, c.size, nowT);
+    drawUnknown(m.x, m.y - hop, m.size * 0.9, nowT + 1);
   }
   // 反応の秒数とほめ言葉（自分の手のよこ）
   if (react && Game.mode !== 'title') {

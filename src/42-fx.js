@@ -42,6 +42,7 @@ function hitPose(P, u, lvl, final) {
 
 function cpuPose(nowT) {
   const P = { dx: 0, dy: Math.sin(nowT * 2.6) * 0.5, rot: 0, kx: 1, ky: 1, scale: 1, sink: false, sinkAmt: 0, mood: 'normal', stars: 0, lump: 0, spin: null, hide: false, trail: 0 };
+  if (Game.mode === 'match' && Game.phase === 'call') { const b = Math.abs(Math.sin((nowT - Game.phaseT0) * 7.5)); P.dy -= b * 1.8; P.rot = Math.sin((nowT - Game.phaseT0) * 7.5) * 0.04; }
   const iu = nowT - VS.introT;
   if (iu >= 0 && iu < 0.6) { const e = easeOut(iu / 0.6); P.dx += (1 - e) * 75; P.dy -= Math.abs(Math.sin(iu * 15)) * (1 - e) * 5; }
   const f = VS.cpu;

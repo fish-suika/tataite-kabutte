@@ -849,12 +849,10 @@ function drawHands(nowT) {
     drawHandBadge(Game.cHand, c.x, c.y, c.size * sc, 1, true);
     drawHandBadge(Game.pHand, m.x, m.y, m.size * sc, 1, true);
   } else {
-    // 「ジャン」「ケン」では両方がこぶしでぽんぽん上下する。待っているときは？
-    const pump = inCall ? Math.abs(Math.sin((nowT - Game.phaseT0) * 7.5)) * 3 : 0;
-    if (inCall) drawHandBadge(0, c.x, c.y - pump * (Game.callIdx + 1) * 0.5, c.size * 0.95, 1, false);
-    else drawUnknown(c.x, c.y, c.size, nowT);
-    if ((inCall || (Game.mode === 'match' && Game.phase === 'ready')) && Game.chosen != null) drawHandBadge(Game.chosen, m.x, m.y - pump * 0.6, m.size * 0.95, 0.55, false);
-    else drawUnknown(m.x, m.y, m.size * 0.9, nowT + 1);
+    // 「ジャン」「ケン」「あいこで」の間も手の形は出さない（ポン／しょ で両方同時に出る）。？の丸が拍に合わせてはねる
+    const hop = inCall ? Math.abs(Math.sin((nowT - Game.phaseT0) * 7.5)) * 2.2 : 0;
+    drawUnknown(c.x, c.y - hop, c.size, nowT);
+    drawUnknown(m.x, m.y - hop, m.size * 0.9, nowT + 1);
   }
   // 反応の秒数とほめ言葉（自分の手のよこ）
   if (react && Game.mode !== 'title') {
@@ -1312,6 +1310,7 @@ function hitPose(P, u, lvl, final) {
 
 function cpuPose(nowT) {
   const P = { dx: 0, dy: Math.sin(nowT * 2.6) * 0.5, rot: 0, kx: 1, ky: 1, scale: 1, sink: false, sinkAmt: 0, mood: 'normal', stars: 0, lump: 0, spin: null, hide: false, trail: 0 };
+  if (Game.mode === 'match' && Game.phase === 'call') { const b = Math.abs(Math.sin((nowT - Game.phaseT0) * 7.5)); P.dy -= b * 1.8; P.rot = Math.sin((nowT - Game.phaseT0) * 7.5) * 0.04; }
   const iu = nowT - VS.introT;
   if (iu >= 0 && iu < 0.6) { const e = easeOut(iu / 0.6); P.dx += (1 - e) * 75; P.dy -= Math.abs(Math.sin(iu * 15)) * (1 - e) * 5; }
   const f = VS.cpu;
@@ -1479,7 +1478,7 @@ function makeCard() {
     // 結果
     if (champ) {
       txt('優勝！', 60, 318, 176, '#ffc21a', { align: 'left', stroke: '#7a1a1a', sw: 26 });
-      T(560, 262, 70, 0.1); lStar(0, 0, 1, '#ffd23f', 0, '#c98a00', 0.08); lEll(-0.25, -0.05, 0.09, 0.12, '#3a2a1a'); lEll(0.25, -0.05, 0.09, 0.12, '#3a2a1a'); lArc(0, 0.12, 0.24, 0.25, Math.PI - 0.25, '#8a3a2a', 0.07); U();
+      T(620, 255, 46, 0.1); lStar(0, 0, 1, '#ffd23f', 0, '#c98a00', 0.08); lEll(-0.25, -0.05, 0.09, 0.12, '#3a2a1a'); lEll(0.25, -0.05, 0.09, 0.12, '#3a2a1a'); lArc(0, 0.12, 0.24, 0.25, Math.PI - 0.25, '#8a3a2a', 0.07); U();
     } else {
       txt(roundLabel(Game.oppIdx) + 'で', 60, 262, 80, '#4a2a10', { align: 'left' });
       txt('敗退…', 60, 372, 150, '#e23b3b', { align: 'left', stroke: '#fff', sw: 20 });
@@ -1489,7 +1488,7 @@ function makeCard() {
     txt('fish-suika.github.io/tataite-kabutte', 600, 596, 28, '#7a4a22');
     // 右：人物
     if (champ) {
-      for (let i = 0; i < 5; i++) { T(790 + (i % 3) * 130 + (i > 2 ? 65 : 0) - 20, 360 + (i > 2 ? 150 : 0), 54, 0); drawChar(i, 'dizzy', 0, { spin: 3 + i }); U(); }
+      for (let i = 0; i < 5; i++) { T(800 + (i % 3) * 150 + (i > 2 ? 75 : 0) - 20, 400 + (i > 2 ? 135 : 0), 44, 0); drawChar(i, 'dizzy', 0, { spin: 3 + i }); U(); }
       for (let i = 0; i < 14; i++) { g.fillStyle = ['#e23b3b', '#ffd23f', '#3d9bff', '#38c172', '#ff8ac0'][i % 5]; g.save(); g.translate(740 + ((i * 97) % 440), 90 + ((i * 53) % 220)); g.rotate(i); g.fillRect(-9, -5, 18, 10); g.restore(); }
     } else {
       T(960, 330, 150, 0); drawChar(Math.min(Game.oppIdx, 4), 'smug', 0); U();
@@ -1917,7 +1916,7 @@ function debugBoot() {
   if (!q.has('dbg')) return false;
   document.documentElement.classList.add('dbg');
   const s = q.get('s') || 'title', k = +(q.get('opp') || 0), u = +(q.get('u') || 0.3);
-  if (s === 'title') { FROZEN = 1000 + u; return true; }
+  if (s === 'title') { FROZEN = 1000 + u; if (q.has('scan')) debugScan(); return true; }
   if (s === 'bot') { debugBot(q); return true; }
   if (s === 'audio') { try { Snd.init(); for (const k of Object.keys(Snd)) if (k !== 'init') Snd[k](1, true); document.title = 'audio:ok'; } catch (er) { document.title = 'audio:ERR ' + er.message; } return true; }
   if (s === 'gallery') { GALLERY = true; FROZEN = 1000 + u; return true; }
@@ -1951,6 +1950,8 @@ function debugBoot() {
     if (evT != null && t >= evT + u) break;
   }
   FROZEN = t;
+  if (q.has('scan')) debugScan();
+  if (q.has('share')) debugShare();
   return true;
 }
 
@@ -1983,6 +1984,43 @@ function debugBot(q) {
   }
   FROZEN = t;
   document.title = 'bot:' + Game.tourney + ':' + (Game.oppIdx + 1) + ':' + JSON.stringify(Game.stats);
+}
+
+// 画面の文章が文節の途中で折り返していないか調べる（動作確認用。#dbg&...&scan）
+function debugScan() {
+  const bad = [];
+  document.querySelectorAll('#stage *').forEach(el => {
+    if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') return;
+    for (const n of el.childNodes) {
+      if (n.nodeType !== 3 || !n.textContent.trim()) continue;
+      const r = document.createRange(); r.selectNodeContents(n);
+      const lines = new Set(Array.from(r.getClientRects()).map(b => Math.round(b.top / 3))).size;
+      const unit = el.closest('.ph,.nb') || getComputedStyle(el).whiteSpace === 'nowrap';
+      if (lines > 1 && unit) bad.push('折り返し:' + n.textContent.trim().slice(0, 14));
+      if (!unit && lines > 1) bad.push('途中で折れる可能性:' + n.textContent.trim().slice(0, 14));
+    }
+  });
+  document.title = 'scan:' + (bad.length ? bad.join(' / ') : 'OK');
+}
+
+// 共有の経路の確認（#dbg&...&share）。PC の X 投稿 URL・スマホの Web Share に渡る中身・結果カードの大きさを調べる
+function debugShare() {
+  const out = [];
+  const c = makeCard(); out.push('card ' + c.width + 'x' + c.height);
+  if (location.hash.indexOf('showcard') >= 0) { c.style.cssText = 'position:fixed;left:0;top:0;width:600px;z-index:99'; document.body.appendChild(c); }
+  let opened = null; const wo = window.open; window.open = u => { opened = u; };
+  doShare(); window.open = wo;
+  out.push('PC:' + opened);
+  let got = null;
+  Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)' });
+  navigator.share = d => { got = d; return Promise.resolve(); };
+  navigator.canShare = d => !!(d && d.files);
+  c.toBlob(b => {
+    shareFile = new File([b], 'x.png', { type: 'image/png' });
+    doShare();
+    out.push('mobile:' + (got ? got.text + ' | ' + got.url + ' | file=' + (got.files && got.files[0].type + ' ' + got.files[0].size + 'B') : 'none'));
+    document.title = 'share:' + out.join(' ;; ');
+  }, 'image/png');
 }
 Game.reset();
 resize();

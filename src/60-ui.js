@@ -252,7 +252,7 @@ function debugBoot() {
   if (!q.has('dbg')) return false;
   document.documentElement.classList.add('dbg');
   const s = q.get('s') || 'title', k = +(q.get('opp') || 0), u = +(q.get('u') || 0.3);
-  if (s === 'title') { FROZEN = 1000 + u; return true; }
+  if (s === 'title') { FROZEN = 1000 + u; if (q.has('scan')) debugScan(); return true; }
   if (s === 'bot') { debugBot(q); return true; }
   if (s === 'audio') { try { Snd.init(); for (const k of Object.keys(Snd)) if (k !== 'init') Snd[k](1, true); document.title = 'audio:ok'; } catch (er) { document.title = 'audio:ERR ' + er.message; } return true; }
   if (s === 'gallery') { GALLERY = true; FROZEN = 1000 + u; return true; }
@@ -286,6 +286,8 @@ function debugBoot() {
     if (evT != null && t >= evT + u) break;
   }
   FROZEN = t;
+  if (q.has('scan')) debugScan();
+  if (q.has('share')) debugShare();
   return true;
 }
 
@@ -318,4 +320,41 @@ function debugBot(q) {
   }
   FROZEN = t;
   document.title = 'bot:' + Game.tourney + ':' + (Game.oppIdx + 1) + ':' + JSON.stringify(Game.stats);
+}
+
+// 画面の文章が文節の途中で折り返していないか調べる（動作確認用。#dbg&...&scan）
+function debugScan() {
+  const bad = [];
+  document.querySelectorAll('#stage *').forEach(el => {
+    if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') return;
+    for (const n of el.childNodes) {
+      if (n.nodeType !== 3 || !n.textContent.trim()) continue;
+      const r = document.createRange(); r.selectNodeContents(n);
+      const lines = new Set(Array.from(r.getClientRects()).map(b => Math.round(b.top / 3))).size;
+      const unit = el.closest('.ph,.nb') || getComputedStyle(el).whiteSpace === 'nowrap';
+      if (lines > 1 && unit) bad.push('折り返し:' + n.textContent.trim().slice(0, 14));
+      if (!unit && lines > 1) bad.push('途中で折れる可能性:' + n.textContent.trim().slice(0, 14));
+    }
+  });
+  document.title = 'scan:' + (bad.length ? bad.join(' / ') : 'OK');
+}
+
+// 共有の経路の確認（#dbg&...&share）。PC の X 投稿 URL・スマホの Web Share に渡る中身・結果カードの大きさを調べる
+function debugShare() {
+  const out = [];
+  const c = makeCard(); out.push('card ' + c.width + 'x' + c.height);
+  if (location.hash.indexOf('showcard') >= 0) { c.style.cssText = 'position:fixed;left:0;top:0;width:600px;z-index:99'; document.body.appendChild(c); }
+  let opened = null; const wo = window.open; window.open = u => { opened = u; };
+  doShare(); window.open = wo;
+  out.push('PC:' + opened);
+  let got = null;
+  Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)' });
+  navigator.share = d => { got = d; return Promise.resolve(); };
+  navigator.canShare = d => !!(d && d.files);
+  c.toBlob(b => {
+    shareFile = new File([b], 'x.png', { type: 'image/png' });
+    doShare();
+    out.push('mobile:' + (got ? got.text + ' | ' + got.url + ' | file=' + (got.files && got.files[0].type + ' ' + got.files[0].size + 'B') : 'none'));
+    document.title = 'share:' + out.join(' ;; ');
+  }, 'image/png');
 }

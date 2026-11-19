@@ -29,7 +29,7 @@ function makeCard() {
     // 結果
     if (champ) {
       txt('優勝！', 60, 318, 176, '#ffc21a', { align: 'left', stroke: '#7a1a1a', sw: 26 });
-      T(560, 262, 70, 0.1); lStar(0, 0, 1, '#ffd23f', 0, '#c98a00', 0.08); lEll(-0.25, -0.05, 0.09, 0.12, '#3a2a1a'); lEll(0.25, -0.05, 0.09, 0.12, '#3a2a1a'); lArc(0, 0.12, 0.24, 0.25, Math.PI - 0.25, '#8a3a2a', 0.07); U();
+      T(620, 255, 46, 0.1); lStar(0, 0, 1, '#ffd23f', 0, '#c98a00', 0.08); lEll(-0.25, -0.05, 0.09, 0.12, '#3a2a1a'); lEll(0.25, -0.05, 0.09, 0.12, '#3a2a1a'); lArc(0, 0.12, 0.24, 0.25, Math.PI - 0.25, '#8a3a2a', 0.07); U();
     } else {
       txt(roundLabel(Game.oppIdx) + 'で', 60, 262, 80, '#4a2a10', { align: 'left' });
       txt('敗退…', 60, 372, 150, '#e23b3b', { align: 'left', stroke: '#fff', sw: 20 });
@@ -39,7 +39,7 @@ function makeCard() {
     txt('fish-suika.github.io/tataite-kabutte', 600, 596, 28, '#7a4a22');
     // 右：人物
     if (champ) {
-      for (let i = 0; i < 5; i++) { T(790 + (i % 3) * 130 + (i > 2 ? 65 : 0) - 20, 360 + (i > 2 ? 150 : 0), 54, 0); drawChar(i, 'dizzy', 0, { spin: 3 + i }); U(); }
+      for (let i = 0; i < 5; i++) { T(800 + (i % 3) * 150 + (i > 2 ? 75 : 0) - 20, 400 + (i > 2 ? 135 : 0), 44, 0); drawChar(i, 'dizzy', 0, { spin: 3 + i }); U(); }
       for (let i = 0; i < 14; i++) { g.fillStyle = ['#e23b3b', '#ffd23f', '#3d9bff', '#38c172', '#ff8ac0'][i % 5]; g.save(); g.translate(740 + ((i * 97) % 440), 90 + ((i * 53) % 220)); g.rotate(i); g.fillRect(-9, -5, 18, 10); g.restore(); }
     } else {
       T(960, 330, 150, 0); drawChar(Math.min(Game.oppIdx, 4), 'smug', 0); U();
