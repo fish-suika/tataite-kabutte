@@ -1,7 +1,7 @@
 // ===== 操作・ループ・結果 =====
-const BEST_KEY = 'tataite-kabutte-best-react';
-function loadBest() { try { return parseFloat(localStorage.getItem(BEST_KEY)) || 0; } catch (_) { return 0; } }
-function saveBest(v) { try { localStorage.setItem(BEST_KEY, String(v)); } catch (_) {} }
+const BEST_KEY = 'tataite-kabutte-best-v2';   // { r: 到達（優勝 = 6）, f: 最速の反応 }
+function loadBest() { try { const v = JSON.parse(localStorage.getItem(BEST_KEY)); return v && typeof v === 'object' ? v : {}; } catch (_) { return {}; } }
+function saveBest(v) { try { localStorage.setItem(BEST_KEY, JSON.stringify(v)); } catch (_) {} }
 
 let shownResult = false, lastNow = 0, overAt = 0;
 const nowSec = () => performance.now() / 1000;
@@ -71,16 +71,19 @@ function bindUI() {
 
 function showResult() {
   shownResult = true;
-  const win = Game.matchResult === 'win';
-  $('rHead').textContent = win ? '勝った！' : '負けた…';
-  $('rSub').textContent = Game.score.p + ' − ' + Game.score.c + '　' + (win ? Game.opp.name + 'に勝利' : Game.opp.name + 'に敗れた');
+  const champ = Game.tourney === 'champion';
+  const reach = champ ? CFG.opps.length + 1 : Game.oppIdx + 1;     // 優勝は 6
+  $('rHead').textContent = champ ? '優勝！' : roundLabel(Game.oppIdx) + 'で 敗退…';
+  $('rSub').textContent = champ ? '町内 叩いて被って大会' : Game.opp.name + 'に 敗れた';
   $('rFast').textContent = Game.fastest != null ? Game.fastest.toFixed(2) + ' 秒' : '—';
   $('rHits').textContent = Game.stats.hits;
   $('rFouls').textContent = Game.stats.fouls;
   const best = loadBest();
-  const isBest = Game.fastest != null && (best === 0 || Game.fastest < best - 1e-9);
-  if (isBest) saveBest(Game.fastest);
-  $('rBest').textContent = isBest && best > 0 ? '最速 こうしん！' : best > 0 ? '自己ベスト ' + best.toFixed(2) + ' 秒' : '';
+  const nb = { r: Math.max(best.r || 0, reach), f: Game.fastest != null && (!best.f || Game.fastest < best.f) ? Game.fastest : best.f };
+  const newReach = reach > (best.r || 0) && (best.r || 0) > 0, newFast = Game.fastest != null && best.f && Game.fastest < best.f - 1e-9;
+  saveBest(nb);
+  const lab = r => r > CFG.opps.length ? '優勝' : roundLabel(r - 1);
+  $('rBest').textContent = (newReach || newFast ? 'ベスト こうしん！　' : '') + '自己ベスト ' + lab(nb.r) + (nb.f ? '・最速 ' + nb.f.toFixed(2) + ' 秒' : '');
   const el = $('result');
   el.classList.add('show', 'wait');   // 指が離れる前にボタンを押してしまわないように、少しの間は触れない
   setTimeout(() => el.classList.remove('wait'), 700);
@@ -92,6 +95,10 @@ function reactToEvents() {
     if (e.type === 'start') {
       $('title').classList.add('hide');
       react = null;
+    } else if (e.type === 'nextOpp') {
+      Snd.win();
+      addPopup(roundLabel(e.idx), 50, 78, 13, '#ffd23f', 1.6);
+      faceT = 0; react = null;
     } else if (e.type === 'call') {
       Snd.call(e.idx, e.aiko);
       react = null;
@@ -150,7 +157,8 @@ function onOutcome(e) {
     case 'nothing':
       Snd.whiff(); addPopup('…', 50, 78, 9, '#e8e0d0', 0.9); break;
   }
-  if (e.matchResult) setTimeout(() => (e.matchResult === 'win' ? Snd.win() : Snd.lose()), 500);
+  if (e.matchResult === 'lose') setTimeout(() => Snd.lose(), 500);
+  else if (e.matchResult === 'win' && e.oppIdx === CFG.opps.length - 1) setTimeout(() => Snd.win(), 500);
 }
 
 function frame() {

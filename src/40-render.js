@@ -144,17 +144,22 @@ function drawHelmet(cx, cy, k, alpha) {
   g.restore();
 }
 
-// ---------- 相手の顔（仮：丸）----------
+// ---------- 相手の顔（仮：丸。相手ごとに服と髪の色だけ変える）----------
+const OPP_LOOK = [
+  { body: '#4a88d8', hair: '#3a2a1a' }, { body: '#3aa05a', hair: '#1a1a2a' }, { body: '#e06a2a', hair: '#2a2a2a' },
+  { body: '#b86ad8', hair: '#d8d8d8' }, { body: '#d82a2a', hair: '#e8b82a' }
+];
 function drawFace(nowT) {
   const f = LAY.face;
   const mood = faceT > 0 ? faceMood : 'normal';
   let bob = Math.sin(nowT * 3) * 0.4, ox = 0, oy = bob;
   if (mood === 'dizzy') ox = Math.sin(nowT * 30) * 0.6;
   // 体
-  fillRR(f.x - 15, f.y + f.r - 2, 30, 14, 6, '#4a88d8', '#2a4c80', 0.6);
+  const LOOK = OPP_LOOK[Math.min(Game.oppIdx, OPP_LOOK.length - 1)];
+  fillRR(f.x - 15, f.y + f.r - 2, 30, 14, 6, LOOK.body, '#2a2a2a', 0.6);
   circle(f.x + ox, f.y + oy, f.r, '#ffd9b3', '#7a4a22', 0.7);
   // 髪
-  g.beginPath(); g.arc(sx(f.x + ox), sy(f.y + oy), f.r * S, Math.PI * 1.05, Math.PI * 1.95); g.fillStyle = '#3a2a1a'; g.fill();
+  g.beginPath(); g.arc(sx(f.x + ox), sy(f.y + oy), f.r * S, Math.PI * 1.05, Math.PI * 1.95); g.fillStyle = LOOK.hair; g.fill();
   const ex = 3.2, ey = f.y + oy - 0.5;
   if (mood === 'dizzy') {
     txt('@', f.x + ox - ex, ey, 4.2, '#333'); txt('@', f.x + ox + ex, ey, 4.2, '#333');
@@ -208,15 +213,27 @@ function render(nowT) {
   if (flashT > 0) { g.globalAlpha = clamp(flashT / 0.25, 0, 1) * 0.35; g.fillStyle = flashColor; g.fillRect(0, 0, cv.width, cv.height); g.globalAlpha = 1; }
 }
 
+// 相手の直前の手の記録（小さく 3 回分。新しい順に左から）
+function drawCpuHistory() {
+  const shown = Game.hist || [];   // 「ポン」で出た手もすぐ記録に入る
+  for (let i = 0; i < 3; i++) {
+    const e = shown[shown.length - 1 - i];
+    const x = 76 + i * 9.5, y = 44;
+    circle(x, y, 4.2, e ? HAND_COL[e.c] : 'rgba(255,255,255,0.35)', '#fff', 0.5);
+    if (e) { g.font = (5.6 * S) + 'px ' + FONT; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#000'; g.fillText(HAND_ICON[e.c], sx(x), sy(y + 0.2)); }
+  }
+}
+
 function drawHud(nowT) {
   const opp = Game.opp || CFG.opps[0];
-  txt((Game.oppIdx + 1) + '回戦　' + opp.name, 50, 4.6, 4.6, '#fff', { stroke: '#7a1a1a' });
+  txt(roundLabel(Game.oppIdx) + '　' + opp.name, 50, 4.6, 4.6, '#fff', { stroke: '#7a1a1a' });
   // 本数の丸（左：あなた、右：相手）
   for (let i = 0; i < CFG.winPoints; i++) {
     circle(10 + i * 8, 16, 3, i < Game.score.p ? '#ffd23f' : 'rgba(255,255,255,0.5)', '#7a4a22', 0.6);
     circle(90 - i * 8, 16, 3, i < Game.score.c ? '#ff6b6b' : 'rgba(255,255,255,0.5)', '#7a4a22', 0.6);
   }
   txt('あなた', 14, 22.5, 3.2, '#5a3a1a'); txt('相手', 86, 22.5, 3.2, '#5a3a1a');
+  drawCpuHistory();
   // 実況（上に一言）
   fillRR(22, 14, 56, 9.5, 4, 'rgba(255,255,255,0.92)', '#7a4a22', 0.5);
   if (Game.comm) txt(Game.comm, 50, 18.9, 4.8, '#4a2a10');
@@ -234,7 +251,7 @@ function drawHands(nowT) {
     if (Game.defaulted && Game.phase === 'grab') { /* 前回と同じ手。罰はなし */ }
   } else {
     drawUnknown(c.x, c.y, c.size, nowT);
-    if (inCall && Game.chosen != null) drawHand(Game.chosen, m.x, m.y, m.size, 0.35, false);
+    if ((inCall || (Game.mode === 'match' && Game.phase === 'ready')) && Game.chosen != null) drawHand(Game.chosen, m.x, m.y, m.size, 0.35, false);
     else drawUnknown(m.x, m.y, m.size * 0.9, nowT + 1);
   }
   // 反応の秒数とほめ言葉（自分の手のよこ）
@@ -274,14 +291,22 @@ function drawTable(nowT) {
 }
 
 function drawButtons(nowT) {
-  const live = Game.mode === 'match' && Game.phase === 'call';
+  const m = Game.mode === 'match';
+  const waiting = m && (Game.phase === 'wait' || (Game.phase === 'ready' && Game.chosen == null));   // 手を選ぶのを待っている
+  const live = m && (Game.phase === 'call' || waiting || Game.phase === 'ready');
+  const pulse = 0.5 + 0.5 * Math.sin(nowT * 7);
   for (let h = 0; h < 3; h++) {
     const b = LAY.btns[h];
-    const sel = Game.mode === 'match' && Game.phase === 'call' && Game.chosen === h;
+    const sel = m && (Game.phase === 'call' || Game.phase === 'ready') && Game.chosen === h;
     const down = pressT[h] > 0;
-    const y = LAY.btnY + (down ? 1.2 : 0);
+    const y = LAY.btnY + (down ? 1.2 : 0) - (waiting ? pulse * 1.2 : 0);
+    if (waiting) {   // 手のボタンがやわらかく光って弾む（文字の説明は出さない）
+      g.globalAlpha = 0.25 + 0.45 * pulse;
+      fillRR(b.x - 1.2, y - 1.2, b.w + 2.4, LAY.btnH + 2.4, 6.2, '#ffd23f');
+      g.globalAlpha = 1;
+    }
     fillRR(b.x, y + 1.2, b.w, LAY.btnH, 5, '#4a2a10');
-    fillRR(b.x, y, b.w, LAY.btnH, 5, sel ? '#fff7c2' : (live || Game.mode === 'title' ? '#fff' : '#d8cdb8'), sel ? '#ffb300' : '#7a4a22', sel ? 1.5 : 0.6);
+    fillRR(b.x, y, b.w, LAY.btnH, 5, sel ? '#fff7c2' : (live || Game.mode === 'title' ? '#fff' : '#d8cdb8'), sel ? '#ffb300' : (waiting ? '#ffb300' : '#7a4a22'), sel ? 1.5 : (waiting ? 1.1 : 0.6));
     g.globalAlpha = live || sel || Game.mode === 'title' ? 1 : 0.75;
     circle(b.x + b.w / 2, y + 10, 7, HAND_COL[h]);
     g.font = (11 * S) + 'px ' + FONT; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#000';

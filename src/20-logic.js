@@ -63,9 +63,36 @@ function resolveRound(rps, pItem, pT, cItem, cT, timeout) {
   return rps === 'lose' ? { type: 'cpuHit', point: 'c', at: timeout, timeout: true } : { type: 'nothing', point: null, at: timeout, timeout: true };
 }
 
+// a に勝つ手
+const winHand = h => (h + 2) % 3;
+// 回戦の名前（最後は決勝）
+function roundLabel(i) { return i === CFG.opps.length - 1 ? '決勝' : (i + 1) + '回戦'; }
+
+// 相手のクセが「いま出したがっている手」（クセを読んだときの答え）。なければ null
+//   goo: いつもグー寄り / loser: 前回負けた手に勝つ手 / repeat: 同じ手を続ける
+//   counter: こちらの前回の手に勝つ手 / none: ばらばら
+// hist は直前までの手の記録 [{ p: 自分の手, c: 相手の手 }]（この相手との試合の中だけ）
+function habitHandOf(opp, hist) {
+  const hb = opp.habit;
+  if (!hb) return null;
+  const last = hist[hist.length - 1];
+  switch (hb.type) {
+    case 'goo': return 0;
+    case 'repeat': return last ? last.c : null;
+    case 'loser': {
+      if (!last) return null;
+      const r = rpsOf(last.p, last.c);
+      if (r === 'draw') return null;
+      return winHand(r === 'win' ? last.c : last.p);
+    }
+    case 'counter': return last ? winHand(last.p) : null;
+    default: return null;
+  }
+}
+
 const Game = {
-  mode: 'title',        // title → match → over
-  phase: '',            // ready → call → (draw → call…) / grab → result → ready … → over
+  mode: 'title',        // title → match（勝ち抜き戦の全体）→ over
+  phase: '',            // ready → wait（手を選ぶのを待つ）→ call → grab → result → ready … / あいこ: draw → wait …
   time: 0, endT: 0, phaseT0: 0,
   seed: 1, rand: null,
   events: [],
@@ -76,11 +103,11 @@ const Game = {
     this.mode = 'title'; this.phase = ''; this.time = 0; this.endT = 0; this.phaseT0 = 0;
     this.oppIdx = 0; this.opp = CFG.opps[0];
     this.score = { p: 0, c: 0 };
-    this.matchResult = '';
+    this.matchResult = '';         // いまの相手との試合：'win' | 'lose'
+    this.tourney = '';             // 勝ち抜き戦の結果：'champion' | 'out'
     this.comm = '';
-    this.lastHand = 0;             // 手を選ばなかったときに出す手（最初はグー）
-    this.hist = [];                // 出した手の記録 { p, c }
-    this.fastest = null;           // 試合を通しての最速（正しい道具を取ったときだけ）
+    this.hist = [];                // この相手との試合で出した手の記録 { p, c }
+    this.fastest = null;           // 通しての最速（正しい道具を取ったときだけ）
     this.stats = { hits: 0, fouls: 0, guards: 0, wrong: 0 };
     this.clearRound();
     this.events = [];
@@ -88,7 +115,7 @@ const Game = {
 
   clearRound() {
     this.aiko = false; this.callIdx = 0; this.callText = '';
-    this.chosen = null; this.defaulted = false;
+    this.chosen = null;
     this.pHand = null; this.cHand = null; this.rps = '';
     this.ponT = 0; this.cpuDone = false;
     this.cItem = null; this.cReact = 0; this.cMistake = false;
@@ -103,37 +130,43 @@ const Game = {
   begin(t) {
     if (this.mode !== 'title') return false;
     this.time = Math.max(this.time, t || 0);
-    this.startMatch(this.time);
+    this.mode = 'match';
+    this.oppIdx = 0;
+    this.fastest = null;
+    this.stats = { hits: 0, fouls: 0, guards: 0, wrong: 0 };
+    this.tourney = '';
+    this.beginOpp(this.time, CFG.readyT, 'start');
     return true;
   },
 
-  startMatch(t) {
+  // 相手との試合を始める（最初の相手も、次の相手もここ）
+  beginOpp(t, dur, evType) {
     this.opp = CFG.opps[this.oppIdx];
-    this.mode = 'match';
     this.score = { p: 0, c: 0 };
     this.matchResult = '';
-    this.fastest = null;
-    this.stats = { hits: 0, fouls: 0, guards: 0, wrong: 0 };
+    this.hist = [];
     this.clearRound();
-    this.comm = (this.oppIdx + 1) + '回戦、はじめ';
-    this.enter('ready', t, CFG.readyT);
-    this.emit({ type: 'start' });
+    this.comm = roundLabel(this.oppIdx) + '、はじめ';
+    this.enter('ready', t, dur);
+    this.emit({ type: evType, idx: this.oppIdx });
   },
 
-  startCall(t, aiko) {
-    this.clearRound();
-    this.aiko = aiko;
+  // 手を選ぶのを待つ（時間制限なし）。選んだ時刻から「ジャン」が始まる
+  startWait(t) {
+    this.phase = 'wait'; this.phaseT0 = t; this.endT = Infinity;
+    this.emit({ type: 'wait', aiko: this.aiko });
+  },
+
+  startCall(t) {
     this.callIdx = 0;
-    this.callText = aiko ? 'あいこで' : 'ジャン';
-    this.enter('call', t, aiko ? CFG.aikoCall : CFG.janT);
-    this.emit({ type: 'call', idx: 0, text: this.callText, aiko });
+    this.callText = this.aiko ? 'あいこで' : 'ジャン';
+    this.enter('call', t, this.aiko ? CFG.aikoCall : CFG.janT);
+    this.emit({ type: 'call', idx: 0, text: this.callText, aiko: this.aiko });
   },
-
-  // 次に何かが起きる時刻（ボットや検証が使う）
-  nextEventT() { return this.endT; },
 
   // 時刻 t まで進める。strict のときは t ちょうどの出来事は先に処理しない（同時は守る側が勝つため）
   advanceTo(t, strict) {
+    if (!isFinite(t)) return;
     if (this.mode === 'match') {
       for (let guard = 0; guard < 1000; guard++) {
         let evT = this.endT, kind = 'phase';
@@ -153,7 +186,10 @@ const Game = {
   phaseEnd() {
     const t = this.endT;
     switch (this.phase) {
-      case 'ready': this.startCall(t, false); break;
+      case 'ready':
+        if (this.chosen != null) this.startCall(t);   // 前もって選んでいたらすぐ「ジャン」
+        else this.startWait(t);
+        break;
       case 'call':
         if (!this.aiko && this.callIdx === 0) {
           this.callIdx = 1; this.callText = 'ケン';
@@ -161,15 +197,23 @@ const Game = {
           this.emit({ type: 'call', idx: 1, text: 'ケン', aiko: false });
         } else this.pon(t);
         break;
-      case 'draw': this.startCall(t, true); break;
+      case 'draw':
+        this.clearRound(); this.aiko = true;
+        this.startWait(t);
+        break;
       case 'grab':   // 時間切れ
         if (!this.outcome) this.finish(resolveRound(this.rps, this.pItem, this.pReact, this.cItem, this.cReact, CFG.grabTimeout), t);
         break;
       case 'result':
-        if (this.matchResult) {
+        if (this.matchResult === 'win' && this.oppIdx < CFG.opps.length - 1) {
+          this.oppIdx++;
+          this.beginOpp(t, CFG.readyT + CFG.nextOppT, 'nextOpp');
+        } else if (this.matchResult) {
+          this.tourney = this.matchResult === 'win' ? 'champion' : 'out';
           this.mode = 'over'; this.phase = 'over';
-          this.emit({ type: 'over', result: this.matchResult });
+          this.emit({ type: 'over', tourney: this.tourney });
         } else {
+          this.clearRound();
           this.comm = '';
           this.enter('ready', t, CFG.gapT);
         }
@@ -177,20 +221,19 @@ const Game = {
     }
   },
 
-  // 相手のジャンケンのクセ（Phase 2 でクセの種類を足す。hist に直前までの手が入っている）
+  // 相手のジャンケンのクセ。クセの強さ s の確率でクセの手、外れたら気まぐれ（3 つから）
   pickCpuHand() {
-    const hb = this.opp.habit, r = this.rand;
+    const r = this.rand;
     const a = r(), b = r();
-    if (hb && hb.type === 'goo' && a < hb.s) return 0;
+    const h = habitHandOf(this.opp, this.hist);
+    if (h != null && a < this.opp.habit.s) return h;
     return Math.floor(b * 3);
   },
 
   // 「ポン」（あいこのときは「しょ」）
   pon(t) {
     this.ponT = t;
-    this.pHand = this.chosen != null ? this.chosen : this.lastHand;
-    this.defaulted = this.chosen == null;
-    this.lastHand = this.pHand;
+    this.pHand = this.chosen != null ? this.chosen : 0;
     this.cHand = this.pickCpuHand();
     this.rps = rpsOf(this.pHand, this.cHand);
     this.hist.push({ p: this.pHand, c: this.cHand });
@@ -224,13 +267,23 @@ const Game = {
     }
   },
 
-  // 手を選ぶ（「ジャン」「ケン」の間だけ。選び直せる）
+  // 手を選ぶ。待っているとき（wait）はここから「ジャン」が始まる。「ジャン」「ケン」の間は選び直せる。
+  // 次の回の前の間（ready）に前もって選んでおくこともできる
   selectHand(h, t) {
     if (t != null) this.advanceTo(t, true);
-    if (this.mode !== 'match' || this.phase !== 'call') return false;
-    this.chosen = h;
-    this.emit({ type: 'select', hand: h });
-    return true;
+    if (this.mode !== 'match') return false;
+    if (this.phase === 'wait') {
+      this.chosen = h;
+      this.emit({ type: 'select', hand: h });
+      this.startCall(Math.max(t == null ? this.time : t, this.time));
+      return true;
+    }
+    if (this.phase === 'call' || this.phase === 'ready') {
+      this.chosen = h;
+      this.emit({ type: 'select', hand: h });
+      return true;
+    }
+    return false;
   },
 
   // 道具をタップ（pointerdown の時刻 t で即判定）
@@ -263,6 +316,6 @@ const Game = {
     if (this.score.p >= CFG.winPoints) this.matchResult = 'win';
     else if (this.score.c >= CFG.winPoints) this.matchResult = 'lose';
     this.enter('result', t, CFG.resultHold);
-    this.emit({ type: 'outcome', outcome: r.type, point: r.point, timeout: !!r.timeout, score: { p: this.score.p, c: this.score.c }, matchResult: this.matchResult });
+    this.emit({ type: 'outcome', outcome: r.type, point: r.point, timeout: !!r.timeout, score: { p: this.score.p, c: this.score.c }, matchResult: this.matchResult, oppIdx: this.oppIdx });
   }
 };
