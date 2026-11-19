@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><title>叩いて被ってジャンケンポン 検証</title>
+<style>body{font:16px sans-serif;padding:16px}.ok{color:#080}.ng{color:#c00;font-weight:bold}.info{color:#555}pre{background:#f4f4f4;padding:8px}</style>
+</head><body><h1>叩いて被ってジャンケンポン 検証</h1><div id="out"></div>
+<script>
+// ===== 調整用の数値（遊びながらここを触る）=====
+// 論理座標：幅 100 × 高さ 177.8（9:16）。時間の単位はすべて秒。
+const CFG = {
+  W: 100, H: 177.8,
+  // --- 合図のテンポ ---
+  readyT: 0.7,        // 試合の最初・各回の前の間（実況が出る）
+  gapT: 0.5,          // 1 回のあと、次の「ジャン」まで
+  janT: 0.4,          // 「ジャン」の長さ（手を選べる）
+  kenT: 0.4,          // 「ケン」の長さ（手を選べる）
+  aikoCall: 0.5,      // あいこのとき「あいこで」の長さ（これが終わると「しょ」で手が出る）
+  drawHold: 0.7,      // あいこの手を見せておく間
+  grabTimeout: 1.5,   // 「ポン」から何も取らないままこの時間が過ぎると決着
+  resultHold: 1.4,    // 決着を見せておく間
+  // --- 試合 ---
+  winPoints: 2,       // 先取の本数（長すぎれば 1 にする）
+  // --- 反応の秒数のほめ言葉（以下ならその言葉。小さい順）---
+  praise: [[0.35, '神速'], [0.45, '速い'], [0.60, 'いいね']],
+  // --- 相手（Phase 2 で 5 人にする。ここに足せば増える）---
+  //  mean: 反応の平均 / spread: ばらつき（標準偏差）/ mistake: 取り違える確率 / min: これより速くは反応しない
+  //  habit: ジャンケンのクセ { type: 'goo'（グーが多い）, s: クセの強さ（その手を出す確率。残りは気まぐれ） }
+  opps: [
+    { name: '近所の小学生', mean: 0.90, spread: 0.18, mistake: 0.12, min: 0.30, habit: { type: 'goo', s: 0.5 } }
+  ],
+  overDelay: 0.5      // 試合が終わってから結果を出すまで（UI 側。ロジックの resultHold のあと）
+};
+// ===== ゲームのロジック（画面を使わない。時刻は秒で明示的に渡す）=====
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// 手：0 グー・1 チョキ・2 パー（グー＞チョキ＞パー＞グー）
+const HAND_NAME = ['グー', 'チョキ', 'パー'];
+const HAND_ICON = ['✊', '✌️', '✋'];
+// a から見た b との勝ち負け
+function rpsOf(a, b) {
+  if (a === b) return 'draw';
+  return ((b - a + 3) % 3 === 1) ? 'win' : 'lose';
+}
+// 反応の秒数 → ほめ言葉（なければ ''）
+function praiseOf(sec) {
+  for (const [lim, word] of CFG.praise) if (sec <= lim) return word;
+  return '';
+}
+
+// 実況の一言
+const COMM = {
+  hit: '決まった！', guarded: 'ガード！', wrongHelmet: 'あれ？被っちゃった',
+  cpuHit: '叩かれた！', guard: 'ナイスガード！', foul: '反則！', cpuFoul: '相手の反則！', nothing: '…様子見'
+};
+
+// 1 回の決着を決める純粋な関数（表の全部の行がここ）。時刻はすべて「ポン」からの秒数。
+//   rps: 自分から見た 'win' | 'lose'
+//   pItem: 自分が最初に取った道具 'hammer' | 'helmet' | null（取らなかった）、pT: その時刻
+//   cItem / cT: 相手が取る道具と時刻（「ポン」の時点で決めておく）
+// 返り値 { type, point('p' 自分 | 'c' 相手 | null), at }
+//   type: hit 叩いた / guarded ガードされた / wrongHelmet 勝ったのに被った / cpuHit 叩かれた /
+//         guard ガード成功 / foul 反則（負けたのにハンマー）/ cpuFoul 相手の反則 / nothing 何もなし
+// 同時刻は守る側（ヘルメット）を優先する。
+function resolveRound(rps, pItem, pT, cItem, cT, timeout) {
+  // 相手が自分だけで決める出来事（相手がハンマーを取ったとき）
+  let auto = null;
+  if (cItem === 'hammer') {
+    auto = rps === 'lose' ? { type: 'cpuHit', point: 'c', at: cT } : { type: 'cpuFoul', point: 'p', at: cT };
+  }
+  // 自分の出来事
+  let pe = null;
+  if (pItem === 'hammer') {
+    if (rps === 'lose') pe = { type: 'foul', point: 'c', at: pT };
+    else if (cItem === 'helmet' && cT <= pT) pe = { type: 'guarded', point: null, at: pT };
+    else pe = { type: 'hit', point: 'p', at: pT };
+  } else if (pItem === 'helmet') {
+    if (rps === 'win') pe = { type: 'wrongHelmet', point: null, at: pT };
+    else pe = { type: 'guard', point: null, at: pT };
+  }
+  if (pe && auto) {
+    // 早い方。同時刻は自分（ヘルメットのガード）を先にする
+    return auto.at < pe.at ? auto : pe;
+  }
+  if (pe) return pe;
+  if (auto) return auto;
+  // どちらも取らないまま時間切れ
+  return rps === 'lose' ? { type: 'cpuHit', point: 'c', at: timeout, timeout: true } : { type: 'nothing', point: null, at: timeout, timeout: true };
+}
+
+const Game = {
+  mode: 'title',        // title → match → over
+  phase: '',            // ready → call → (draw → call…) / grab → result → ready … → over
+  time: 0, endT: 0, phaseT0: 0,
+  seed: 1, rand: null,
+  events: [],
+
+  reset(seed) {
+    this.seed = seed == null ? (Date.now() & 0xffffff) : seed;
+    this.rand = mulberry32(this.seed);
+    this.mode = 'title'; this.phase = ''; this.time = 0; this.endT = 0; this.phaseT0 = 0;
+    this.oppIdx = 0; this.opp = CFG.opps[0];
+    this.score = { p: 0, c: 0 };
+    this.matchResult = '';
+    this.comm = '';
+    this.lastHand = 0;             // 手を選ばなかったときに出す手（最初はグー）
+    this.hist = [];                // 出した手の記録 { p, c }
+    this.fastest = null;           // 試合を通しての最速（正しい道具を取ったときだけ）
+    this.stats = { hits: 0, fouls: 0, guards: 0, wrong: 0 };
+    this.clearRound();
+    this.events = [];
+  },
+
+  clearRound() {
+    this.aiko = false; this.callIdx = 0; this.callText = '';
+    this.chosen = null; this.defaulted = false;
+    this.pHand = null; this.cHand = null; this.rps = '';
+    this.ponT = 0; this.cpuDone = false;
+    this.cItem = null; this.cReact = 0; this.cMistake = false;
+    this.pItem = null; this.pReact = null; this.pCorrect = false; this.pPraise = '';
+    this.outcome = ''; this.point = null; this.resolveT = 0;
+  },
+
+  emit(e) { e.t = this.time; this.events.push(e); },
+  enter(phase, t, dur) { this.phase = phase; this.phaseT0 = t; this.endT = t + dur; },
+
+  // タイトルのタップ。すぐ 1 回戦が始まる
+  begin(t) {
+    if (this.mode !== 'title') return false;
+    this.time = Math.max(this.time, t || 0);
+    this.startMatch(this.time);
+    return true;
+  },
+
+  startMatch(t) {
+    this.opp = CFG.opps[this.oppIdx];
+    this.mode = 'match';
+    this.score = { p: 0, c: 0 };
+    this.matchResult = '';
+    this.fastest = null;
+    this.stats = { hits: 0, fouls: 0, guards: 0, wrong: 0 };
+    this.clearRound();
+    this.comm = (this.oppIdx + 1) + '回戦、はじめ';
+    this.enter('ready', t, CFG.readyT);
+    this.emit({ type: 'start' });
+  },
+
+  startCall(t, aiko) {
+    this.clearRound();
+    this.aiko = aiko;
+    this.callIdx = 0;
+    this.callText = aiko ? 'あいこで' : 'ジャン';
+    this.enter('call', t, aiko ? CFG.aikoCall : CFG.janT);
+    this.emit({ type: 'call', idx: 0, text: this.callText, aiko });
+  },
+
+  // 次に何かが起きる時刻（ボットや検証が使う）
+  nextEventT() { return this.endT; },
+
+  // 時刻 t まで進める。strict のときは t ちょうどの出来事は先に処理しない（同時は守る側が勝つため）
+  advanceTo(t, strict) {
+    if (this.mode === 'match') {
+      for (let guard = 0; guard < 1000; guard++) {
+        let evT = this.endT, kind = 'phase';
+        if (this.phase === 'grab' && !this.cpuDone) {
+          const ct = this.ponT + this.cReact;
+          if (ct <= evT) { evT = ct; kind = 'cpu'; }
+        }
+        if (strict ? evT >= t : evT > t) break;
+        this.time = Math.max(this.time, evT);
+        if (kind === 'cpu') this.cpuEvent(evT); else this.phaseEnd();
+        if (this.mode !== 'match') break;
+      }
+    }
+    this.time = Math.max(this.time, t);
+  },
+
+  phaseEnd() {
+    const t = this.endT;
+    switch (this.phase) {
+      case 'ready': this.startCall(t, false); break;
+      case 'call':
+        if (!this.aiko && this.callIdx === 0) {
+          this.callIdx = 1; this.callText = 'ケン';
+          this.enter('call', t, CFG.kenT);
+          this.emit({ type: 'call', idx: 1, text: 'ケン', aiko: false });
+        } else this.pon(t);
+        break;
+      case 'draw': this.startCall(t, true); break;
+      case 'grab':   // 時間切れ
+        if (!this.outcome) this.finish(resolveRound(this.rps, this.pItem, this.pReact, this.cItem, this.cReact, CFG.grabTimeout), t);
+        break;
+      case 'result':
+        if (this.matchResult) {
+          this.mode = 'over'; this.phase = 'over';
+          this.emit({ type: 'over', result: this.matchResult });
+        } else {
+          this.comm = '';
+          this.enter('ready', t, CFG.gapT);
+        }
+        break;
+    }
+  },
+
+  // 相手のジャンケンのクセ（Phase 2 でクセの種類を足す。hist に直前までの手が入っている）
+  pickCpuHand() {
+    const hb = this.opp.habit, r = this.rand;
+    const a = r(), b = r();
+    if (hb && hb.type === 'goo' && a < hb.s) return 0;
+    return Math.floor(b * 3);
+  },
+
+  // 「ポン」（あいこのときは「しょ」）
+  pon(t) {
+    this.ponT = t;
+    this.pHand = this.chosen != null ? this.chosen : this.lastHand;
+    this.defaulted = this.chosen == null;
+    this.lastHand = this.pHand;
+    this.cHand = this.pickCpuHand();
+    this.rps = rpsOf(this.pHand, this.cHand);
+    this.hist.push({ p: this.pHand, c: this.cHand });
+    this.callText = this.aiko ? 'しょ' : 'ポン';
+    // 相手の反応は「ポン」の時点で決めておく
+    const r = this.rand, o = this.opp;
+    const z = (r() + r() + r() - 1.5) / 0.5;           // ほぼ正規分布（標準偏差 1）
+    this.cReact = Math.round(clamp(o.mean + z * o.spread, o.min, CFG.grabTimeout - 0.1) * 1e6) / 1e6;
+    this.cMistake = r() < o.mistake;
+    this.cpuDone = false; this.pItem = null;
+    this.emit({ type: 'pon', text: this.callText, aiko: this.aiko, pHand: this.pHand, cHand: this.cHand, rps: this.rps });
+    if (this.rps === 'draw') {
+      this.cItem = null;
+      this.comm = 'あいこ';
+      this.enter('draw', t, CFG.drawHold);
+      this.emit({ type: 'draw' });
+      return;
+    }
+    const cWins = this.rps === 'lose';                  // 相手が勝ったなら正解はハンマー
+    this.cItem = (cWins !== this.cMistake) ? 'hammer' : 'helmet';
+    this.comm = '';
+    this.enter('grab', t, CFG.grabTimeout);
+  },
+
+  // 相手が道具を取る
+  cpuEvent(t) {
+    this.cpuDone = true;
+    this.emit({ type: 'cpuTake', item: this.cItem, mistake: this.cMistake });
+    if (this.cItem === 'hammer' && !this.outcome) {
+      this.finish(resolveRound(this.rps, this.pItem, this.pReact, this.cItem, this.cReact, CFG.grabTimeout), t);
+    }
+  },
+
+  // 手を選ぶ（「ジャン」「ケン」の間だけ。選び直せる）
+  selectHand(h, t) {
+    if (t != null) this.advanceTo(t, true);
+    if (this.mode !== 'match' || this.phase !== 'call') return false;
+    this.chosen = h;
+    this.emit({ type: 'select', hand: h });
+    return true;
+  },
+
+  // 道具をタップ（pointerdown の時刻 t で即判定）
+  tapItem(which, t) {
+    if (t == null) t = this.time;
+    this.advanceTo(t, true);
+    if (this.mode !== 'match' || this.phase !== 'grab' || this.pItem || this.outcome) return false;
+    if (t < this.ponT) return false;                    // 「ポン」より前の分は無効
+    const rel = Math.round((t - this.ponT) * 1e6) / 1e6;   // 浮動小数の誤差で同時刻がずれないように
+    this.pItem = which; this.pReact = rel;
+    this.pCorrect = (this.rps === 'win' && which === 'hammer') || (this.rps === 'lose' && which === 'helmet');
+    this.pPraise = this.pCorrect ? praiseOf(rel) : '';
+    if (this.pCorrect && (this.fastest == null || rel < this.fastest)) this.fastest = rel;
+    this.emit({ type: 'tap', item: which, react: rel, correct: this.pCorrect, praise: this.pPraise });
+    const r = resolveRound(this.rps, which, rel, this.cItem, this.cReact, CFG.grabTimeout);
+    this.finish(r, this.ponT + r.at);
+    return true;
+  },
+
+  finish(r, t) {
+    this.time = Math.max(this.time, t);
+    this.outcome = r.type; this.point = r.point; this.resolveT = t;
+    if (r.point === 'p') this.score.p++;
+    if (r.point === 'c') this.score.c++;
+    if (r.type === 'hit') this.stats.hits++;
+    if (r.type === 'foul') this.stats.fouls++;
+    if (r.type === 'guard') this.stats.guards++;
+    if (r.type === 'wrongHelmet') this.stats.wrong++;
+    this.comm = COMM[r.type] || '';
+    if (this.score.p >= CFG.winPoints) this.matchResult = 'win';
+    else if (this.score.c >= CFG.winPoints) this.matchResult = 'lose';
+    this.enter('result', t, CFG.resultHold);
+    this.emit({ type: 'outcome', outcome: r.type, point: r.point, timeout: !!r.timeout, score: { p: this.score.p, c: this.score.c }, matchResult: this.matchResult });
+  }
+};
+// ===== 自動テスト（画面なし。時刻を渡して 1 回ずつ・ボットで試合を回す）=====
+(function () {
+  const out = document.getElementById('out');
+  let fail = 0, total = 0;
+  function check(name, cond, note) {
+    total++;
+    if (!cond) fail++;
+    const p = document.createElement('div');
+    p.className = cond ? 'ok' : 'ng';
+    p.textContent = (cond ? 'PASS  ' : 'FAIL  ') + name + (note ? '  [' + note + ']' : '');
+    out.appendChild(p);
+  }
+  function info(text) {
+    const p = document.createElement('div');
+    p.className = 'info'; p.textContent = '    ' + text;
+    out.appendChild(p);
+  }
+  function head(text) {
+    const p = document.createElement('h3'); p.textContent = text; out.appendChild(p);
+  }
+  const ORIG_PICK = Game.pickCpuHand;
+
+  // ---------- 1. 判定表（resolveRound）の全部の行 ----------
+  head('1. 判定表');
+  const TO = CFG.grabTimeout;
+  const R = (rps, pItem, pT, cItem, cT) => resolveRound(rps, pItem, pT, cItem, cT, TO);
+  function row(name, r, type, point) {
+    check(name, r.type === type && r.point === point, '→ ' + r.type + '/' + r.point + '（期待 ' + type + '/' + point + '）');
+  }
+  // 勝ち
+  row('勝ち＋ハンマー（相手がヘルメットを被るより速い）→ 自分の 1 本', R('win', 'hammer', 0.5, 'helmet', 0.9), 'hit', 'p');
+  row('勝ち＋ハンマー（相手が先に被った）→ ガードされた・本数なし', R('win', 'hammer', 0.9, 'helmet', 0.5), 'guarded', null);
+  row('勝ち＋ヘルメット → 間違い・本数なし', R('win', 'helmet', 0.5, 'helmet', 0.9), 'wrongHelmet', null);
+  row('勝ち＋ハンマー（相手が負けたのにハンマーを取った・相手が先）→ 相手の反則で自分の 1 本', R('win', 'hammer', 0.9, 'hammer', 0.5), 'cpuFoul', 'p');
+  row('勝ち＋ハンマー（相手が負けたのにハンマー・自分が先）→ 自分の 1 本', R('win', 'hammer', 0.4, 'hammer', 0.6), 'hit', 'p');
+  row('勝ち＋何も取らない・相手が正しく被る → 時間切れで何もなし', R('win', null, null, 'helmet', 0.9), 'nothing', null);
+  row('勝ち＋何も取らない・相手が負けたのにハンマー → 相手の反則で自分の 1 本', R('win', null, null, 'hammer', 0.9), 'cpuFoul', 'p');
+  // 負け
+  row('負け＋ヘルメット（相手が叩くより速い）→ ガード成功・本数なし', R('lose', 'helmet', 0.5, 'hammer', 0.9), 'guard', null);
+  row('負け＋ヘルメット（相手が先に叩いた）→ 相手の 1 本', R('lose', 'helmet', 0.9, 'hammer', 0.5), 'cpuHit', 'c');
+  row('負け＋ハンマー → 反則・相手の 1 本', R('lose', 'hammer', 0.3, 'hammer', 0.9), 'foul', 'c');
+  row('負け＋ハンマー（相手が先に叩いていた）→ 相手の 1 本', R('lose', 'hammer', 0.9, 'hammer', 0.5), 'cpuHit', 'c');
+  row('負け＋ハンマー（相手が取り違えてヘルメット）→ 反則・相手の 1 本', R('lose', 'hammer', 0.3, 'helmet', 0.9), 'foul', 'c');
+  row('負け＋ヘルメット（相手が取り違えてヘルメット）→ 本数なし', R('lose', 'helmet', 1.2, 'helmet', 0.5), 'guard', null);
+  row('負け＋何も取らない → 約 1.5 秒で相手が叩く・相手の 1 本', R('lose', null, null, 'hammer', 1.2), 'cpuHit', 'c');
+  row('負け＋何も取らない・相手が取り違えても時間切れで叩かれる', R('lose', null, null, 'helmet', 0.7), 'cpuHit', 'c');
+  const rto = R('lose', null, null, 'helmet', 0.7);
+  check('時間切れの決着は ' + TO + ' 秒', rto.at === TO, 'at=' + rto.at);
+  // 同時刻：ヘルメット（守る側）が勝つ
+  row('同時刻（勝ち＋ハンマー vs 相手ヘルメット）→ 守る側が勝つ（ガードされた）', R('win', 'hammer', 0.6, 'helmet', 0.6), 'guarded', null);
+  row('同時刻（負け＋ヘルメット vs 相手ハンマー）→ 守る側が勝つ（ガード成功）', R('lose', 'helmet', 0.6, 'hammer', 0.6), 'guard', null);
+
+  // ---------- 2. 実際の流れ（時刻を渡して 1 回ずつ進める）----------
+  head('2. 流れ（合図・手の選択・タップ）');
+  function fresh(seed) { Game.reset(seed || 1); Game.begin(0); }
+  // 「ポン」まで進めて取り合いの状態にする（あいこなら進める）。強制的に手と相手の動きを決める
+  function toGrab(o) {
+    o = o || {};
+    fresh(o.seed);
+    const orig = Game.pickCpuHand;
+    if (o.cHand != null) Game.pickCpuHand = function () { orig.call(this); return o.cHand; };
+    Game.advanceTo(Game.endT - 0.0001);            // ready の終わり直前
+    if (o.pHand != null) { Game.advanceTo(Game.endT + 0.0001); Game.selectHand(o.pHand, Game.time); }
+    let n = 0;
+    while (Game.phase !== 'grab' && n++ < 20) Game.advanceTo(Game.endT);
+    Game.pickCpuHand = orig;
+    // 相手の動きを上書き
+    if (o.rps) Game.rps = o.rps;
+    if (o.cItem) Game.cItem = o.cItem;
+    if (o.cReact != null) Game.cReact = o.cReact;
+    return Game.phase === 'grab';
+  }
+  function playRow(rps, which, react, cItem, cReact) {
+    // rps に合う手の組を選ぶ：自分グー(0)、相手 チョキ(1)=勝ち / パー(2)=負け
+    const ok = toGrab({ pHand: 0, cHand: rps === 'win' ? 1 : 2, cItem, cReact });
+    if (!ok) return null;
+    if (which) Game.tapItem(which, Game.ponT + react);
+    else Game.advanceTo(Game.ponT + TO + 0.01);
+    return { outcome: Game.outcome, point: Game.point, score: { ...Game.score }, phase: Game.phase };
+  }
+  let r;
+  r = playRow('win', 'hammer', 0.5, 'helmet', 0.9);
+  check('流れ：勝ち＋ハンマーで自分の 1 本、スコア 1-0', r && r.outcome === 'hit' && r.score.p === 1 && r.score.c === 0 && r.phase === 'result', JSON.stringify(r));
+  r = playRow('win', 'hammer', 0.9, 'helmet', 0.5);
+  check('流れ：先に被られたらガードされ、スコア 0-0', r && r.outcome === 'guarded' && r.score.p === 0 && r.score.c === 0, JSON.stringify(r));
+  r = playRow('win', 'helmet', 0.5, 'helmet', 0.9);
+  check('流れ：勝ったのにヘルメットは間違い、スコア 0-0', r && r.outcome === 'wrongHelmet' && r.score.p === 0 && r.score.c === 0, JSON.stringify(r));
+  r = playRow('lose', 'helmet', 0.5, 'hammer', 0.9);
+  check('流れ：負け＋速いヘルメットでガード成功、スコア 0-0', r && r.outcome === 'guard' && r.score.p === 0 && r.score.c === 0, JSON.stringify(r));
+  r = playRow('lose', 'helmet', 1.2, 'hammer', 0.6);
+  check('流れ：負け＋遅いヘルメットは叩かれる（タップ前に相手の 1 本が決まる）、スコア 0-1', r && r.outcome === 'cpuHit' && r.score.c === 1 && r.score.p === 0, JSON.stringify(r));
+  r = playRow('lose', 'hammer', 0.3, 'hammer', 0.9);
+  check('流れ：負け＋ハンマーは反則で相手の 1 本、スコア 0-1', r && r.outcome === 'foul' && r.score.c === 1, JSON.stringify(r));
+  r = playRow('lose', null, 0, 'hammer', 0.9);
+  check('流れ：負けて何も取らないと叩かれる（相手の反応の時刻に決着）', r && r.outcome === 'cpuHit' && Game.resolveT - Game.ponT > 0.89 && Game.resolveT - Game.ponT < 0.91, JSON.stringify(r) + ' at=' + (Game.resolveT - Game.ponT).toFixed(3));
+  r = playRow('lose', null, 0, 'helmet', 0.9);
+  check('流れ：負けて何も取らず相手も取り違え → ' + TO + ' 秒で叩かれる', r && r.outcome === 'cpuHit' && Math.abs(Game.resolveT - Game.ponT - TO) < 0.001, JSON.stringify(r));
+  r = playRow('win', null, 0, 'helmet', 0.9);
+  check('流れ：勝って何も取らなければ何もなし、スコア 0-0', r && r.outcome === 'nothing' && r.score.p === 0 && r.score.c === 0, JSON.stringify(r));
+  r = playRow('win', null, 0, 'hammer', 0.7);
+  check('流れ：相手が負けたのにハンマーを取ると相手の反則で自分の 1 本', r && r.outcome === 'cpuFoul' && r.score.p === 1, JSON.stringify(r));
+  // タップの同時刻
+  toGrab({ pHand: 0, cHand: 1, cItem: 'helmet', cReact: 0.6 }); Game.tapItem('hammer', Game.ponT + 0.6);
+  check('流れ：同時刻（ハンマー vs 相手のヘルメット）はガードされる', Game.outcome === 'guarded', Game.outcome);
+  toGrab({ pHand: 0, cHand: 2, cItem: 'hammer', cReact: 0.6 }); Game.tapItem('helmet', Game.ponT + 0.6);
+  check('流れ：同時刻（ヘルメット vs 相手のハンマー）はガード成功', Game.outcome === 'guard', Game.outcome);
+
+  // --- 実況・結果の文字は道具を取るまで出ない / 手は「ポン」で両方出る ---
+  toGrab({ pHand: 0, cHand: 1 });
+  check('「ポン」の直後は勝ち負けの文字なし（実況が空・結果が未決）', Game.comm === '' && Game.outcome === '' && Game.pHand === 0 && Game.cHand === 1, 'comm="' + Game.comm + '"');
+  Game.tapItem('hammer', Game.ponT + 0.4);
+  check('道具を取った後に結果の実況が出る', Game.comm === COMM.hit, Game.comm);
+  check('反応の秒数が記録される（0.40 秒）と、ほめ言葉は「速い」', Math.abs(Game.pReact - 0.4) < 1e-9 && Game.pPraise === '速い', Game.pReact + ' ' + Game.pPraise);
+  check('ほめ言葉のしきい値（0.30 神速 / 0.40 速い / 0.55 いいね / 0.70 なし）', praiseOf(0.30) === '神速' && praiseOf(0.40) === '速い' && praiseOf(0.55) === 'いいね' && praiseOf(0.70) === '', praiseOf(0.30) + praiseOf(0.40) + praiseOf(0.55) + '[' + praiseOf(0.7) + ']');
+
+  // --- 「ポン」より前のタップは無視 ---
+  fresh(3);
+  Game.advanceTo(CFG.readyT + 0.1);   // ジャンの途中
+  check('ジャンの間は道具のタップを無視', Game.phase === 'call' && Game.tapItem('hammer', Game.time) === false && Game.pItem === null);
+  Game.advanceTo(CFG.readyT + CFG.janT + 0.1);
+  check('ケンの間も道具のタップを無視', Game.phase === 'call' && Game.callText === 'ケン' && Game.tapItem('helmet', Game.time) === false && Game.pItem === null);
+  check('手を選ぶのは「ケン」の間もできる（選び直せる）', Game.selectHand(1, Game.time) === true && Game.chosen === 1 && Game.selectHand(2, Game.time) === true && Game.chosen === 2);
+  const t0 = CFG.readyT, ponAt = t0 + CFG.janT + CFG.kenT;
+  Game.advanceTo(ponAt - 0.001);
+  check('ポンの直前まではまだ道具を取れない', Game.phase === 'call' && Game.tapItem('hammer', ponAt - 0.001) === false);
+  Game.advanceTo(ponAt + 0.001);
+  check('合図は ジャン' + CFG.janT + '秒 → ケン' + CFG.kenT + '秒 → ポン、ポンで選んだ手（パー）が出る', Math.abs(Game.ponT - ponAt) < 1e-9 && Game.pHand === 2 && (Game.phase === 'grab' || Game.phase === 'draw'), 'ponT=' + Game.ponT.toFixed(3) + ' pHand=' + Game.pHand);
+  check('ポンの後は手を選び直せない', Game.selectHand(0, Game.time) === false);
+
+  // --- 手を選ばなかったら前回と同じ手（最初はグー）---
+  function toNextPon(hand) {
+    const before = Game.hist.length;
+    for (let n = 0; n < 50; n++) {
+      if (Game.phase === 'call' && Game.chosen == null && hand != null) Game.selectHand(hand, Game.time);
+      Game.advanceTo(Game.endT);
+      if (Game.hist.length !== before) return;
+    }
+  }
+  fresh(5);
+  Game.pickCpuHand = function () { return 2; };            // 相手はパー固定
+  toNextPon(null);
+  check('手を選ばず「ポン」→ 最初はグー（罰なし）', Game.pHand === 0 && Game.defaulted === true && Game.rps === 'lose', 'pHand=' + Game.pHand);
+  Game.tapItem('helmet', Game.ponT + 0.1);
+  toNextPon(1);                                              // チョキを選ぶ
+  check('手を選ぶとその手が出て、「前回の手」になる', Game.pHand === 1 && Game.defaulted === false && Game.lastHand === 1, 'pHand=' + Game.pHand);
+  Game.tapItem('hammer', Game.ponT + 0.1);                  // チョキ vs パー＝勝ち
+  toNextPon(null);
+  check('手を選ばなければ前回と同じ手（チョキ）', Game.pHand === 1 && Game.defaulted === true, 'pHand=' + Game.pHand + ' phase=' + Game.phase);
+  Game.pickCpuHand = ORIG_PICK;
+
+  // --- あいこ：選び直し・道具は取れない・短い合図 ---
+  fresh(7);
+  Game.pickCpuHand = function () { return 1; };             // 相手はチョキ固定
+  Game.advanceTo(CFG.readyT); Game.selectHand(1, Game.time);   // 自分もチョキ → あいこ
+  Game.advanceTo(CFG.readyT + CFG.janT + CFG.kenT + 0.001);
+  check('同じ手ならあいこ（道具の取り合いにならない）', Game.phase === 'draw' && Game.rps === 'draw' && Game.cItem === null, Game.phase);
+  check('あいこの間は道具を取れない', Game.tapItem('hammer', Game.time + 0.01) === false && Game.outcome === '');
+  const dEnd = Game.endT;
+  Game.advanceTo(dEnd + 0.001);
+  check('あいこのあとは「あいこで」の短い合図で、手を選び直せる', Game.phase === 'call' && Game.aiko === true && Game.callText === 'あいこで' && Game.selectHand(0, Game.time) === true && Game.chosen === 0, Game.phase + ' ' + Game.callText);
+  check('あいこの合図はジャン＋ケンより短い', CFG.aikoCall < CFG.janT + CFG.kenT, CFG.aikoCall + ' < ' + (CFG.janT + CFG.kenT));
+  check('「あいこで」の間も道具は取れない', Game.tapItem('hammer', Game.time) === false);
+  const aEnd = Game.endT;
+  Game.advanceTo(aEnd + 0.001);
+  check('「しょ」で選び直した手（グー）が出る → グー vs チョキ＝勝ち、取り合いへ', Game.callText === 'しょ' && Game.pHand === 0 && Game.rps === 'win' && Game.phase === 'grab', Game.callText + ' pHand=' + Game.pHand + ' ' + Game.phase);
+  check('あいこは本数に入らず、1 回戦の回数も増えない', Game.score.p === 0 && Game.score.c === 0);
+  // あいこで選ばなかったら、あいこになった手（前回）と同じ
+  fresh(8);
+  Game.pickCpuHand = function () { return 1; };
+  Game.advanceTo(CFG.readyT); Game.selectHand(1, Game.time);
+  Game.advanceTo(CFG.readyT + CFG.janT + CFG.kenT + 0.001);   // あいこ
+  Game.advanceTo(Game.endT); Game.advanceTo(Game.endT);       // あいこで → しょ（選ばない）
+  check('あいこで選ばなければ前回と同じ手（チョキ）→ またあいこ', Game.pHand === 1 && Game.defaulted === true && Game.phase === 'draw', 'pHand=' + Game.pHand + ' ' + Game.phase);
+  Game.pickCpuHand = ORIG_PICK;
+
+  // --- 試合：2 本先取で終わる ---
+  fresh(9);
+  let guard = 0;
+  while (Game.mode === 'match' && guard++ < 200) {
+    if (Game.phase === 'call' && Game.chosen == null) Game.selectHand(0, Game.time);
+    if (Game.phase === 'grab' && !Game.pItem) Game.tapItem(Game.rps === 'win' ? 'hammer' : 'helmet', Game.ponT + 0.3);
+    Game.advanceTo(Game.endT);
+  }
+  check('2 本先取で試合が終わり、結果の画面（over）になる', Game.mode === 'over' && Game.matchResult === 'win' && Game.score.p === CFG.winPoints, 'mode=' + Game.mode + ' score=' + Game.score.p + '-' + Game.score.c);
+  check('最速の反応が記録される（0.30 秒）', Game.fastest != null && Math.abs(Game.fastest - 0.3) < 1e-9, String(Game.fastest));
+  check('試合が終わると道具のタップは無視', Game.tapItem('hammer', Game.time + 1) === false);
+
+  // ---------- 3. ボットで 200 試合 ----------
+  head('3. ボットで試合（相手 1：近所の小学生）');
+  function playMatch(bot, seed) {
+    Game.reset(seed); Game.begin(0);
+    const brng = mulberry32(seed * 7919 + 13);
+    let n = 0;
+    while (Game.mode === 'match' && n++ < 2000) {
+      if (Game.phase === 'call' && Game.chosen == null) Game.selectHand(Math.floor(brng() * 3), Game.time);
+      if (Game.phase === 'grab' && !Game.pItem) {
+        const item = bot.item(Game.rps);
+        if (item) {
+          const react = Math.max(0.15, bot.react + (brng() + brng() + brng() - 1.5) * bot.jitter);
+          Game.tapItem(item, Game.ponT + react);
+        }
+      }
+      Game.advanceTo(Game.endT);
+    }
+    Game.events.length = 0;
+    return { win: Game.matchResult === 'win', over: Game.mode === 'over', score: Game.score };
+  }
+  const N = 200;
+  const bots = {
+    always03: { name: 'いつもハンマー（0.3 秒で即）', item: () => 'hammer', react: 0.3, jitter: 0.05 },
+    judge05: { name: '正しく判断（0.5 秒）', item: rps => rps === 'win' ? 'hammer' : 'helmet', react: 0.5, jitter: 0.1 },
+    judge07: { name: '正しく判断（0.7 秒）', item: rps => rps === 'win' ? 'hammer' : 'helmet', react: 0.7, jitter: 0.1 },
+    judge12: { name: '正しく判断（1.2 秒）', item: rps => rps === 'win' ? 'hammer' : 'helmet', react: 1.2, jitter: 0.1 },
+    none: { name: '何も取らない', item: () => null, react: 0, jitter: 0 }
+  };
+  const rate = {};
+  for (const k in bots) {
+    let w = 0, ok = 0;
+    for (let s = 1; s <= N; s++) { const r = playMatch(bots[k], s); if (r.win) w++; if (r.over) ok++; }
+    rate[k] = w / N;
+    info(bots[k].name + '：' + w + ' / ' + N + ' 勝（勝率 ' + (w / N * 100).toFixed(1) + '%）' + (ok === N ? '' : '  ※終わらない試合あり ' + (N - ok)));
+    if (ok !== N) check('全試合が終わる（' + k + '）', false);
+  }
+  check('いつもハンマー（0.3 秒）は確実には勝てない（勝率 70% 未満。ジャンケンの勝ち負けで運任せ）', rate.always03 < 0.7, (rate.always03 * 100).toFixed(1) + '%');
+  check('いつもハンマーより、正しく判断する 0.5 秒のボットのほうがずっと勝つ（勝率 90% 以上）', rate.judge05 >= 0.9 && rate.judge05 > rate.always03 + 0.3, (rate.judge05 * 100).toFixed(1) + '% vs ' + (rate.always03 * 100).toFixed(1) + '%');
+  check('正しく判断する 0.7 秒のボットも勝つことが多い（勝率 70% 以上）', rate.judge07 >= 0.7, (rate.judge07 * 100).toFixed(1) + '%');
+  check('正しく判断しても 1.2 秒では遅くて、ほとんど負ける（勝率 20% 未満）', rate.judge12 < 0.2, (rate.judge12 * 100).toFixed(1) + '%');
+  check('何も取らないボットはほとんど負ける（勝率 20% 未満）', rate.none < 0.2, (rate.none * 100).toFixed(1) + '%');
+
+  // --- 同じシードで同じ試合になる ---
+  const sig = s => { playMatch(bots.judge07, s); return Game.score.p + '-' + Game.score.c + '/' + Game.hist.map(h => h.p + '' + h.c).join(','); };
+  check('同じシードなら同じ試合になる（再現できる）', sig(42) === sig(42) && sig(42) !== sig(43), sig(42));
+
+  // 相手の手のクセ：グーが多い（Phase 2 の下準備）
+  Game.reset(11); Game.begin(0);
+  let goo = 0; const M = 3000;
+  for (let i = 0; i < M; i++) if (Game.pickCpuHand() === 0) goo++;
+  const expect = CFG.opps[0].habit.s + (1 - CFG.opps[0].habit.s) / 3;
+  info('相手 1 のグーの割合：' + (goo / M * 100).toFixed(1) + '%（期待 ' + (expect * 100).toFixed(1) + '%）');
+  check('相手 1 はグーを多く出す（クセの強さどおり ±4%）', Math.abs(goo / M - expect) < 0.04);
+
+  // 相手の反応の分布
+  Game.reset(12); Game.begin(0);
+  let sum = 0, mn = 9, mx = 0, mis = 0; const K = 3000;
+  for (let i = 0; i < K; i++) { Game.pon(0); sum += Game.cReact; mn = Math.min(mn, Game.cReact); mx = Math.max(mx, Game.cReact); if (Game.cMistake) mis++; }
+  info('相手 1 の反応：平均 ' + (sum / K).toFixed(2) + ' 秒（最速 ' + mn.toFixed(2) + '・最遅 ' + mx.toFixed(2) + '）、取り違え ' + (mis / K * 100).toFixed(1) + '%');
+  check('相手 1 の反応の平均は設定の ' + CFG.opps[0].mean + ' 秒に近い（±0.03）', Math.abs(sum / K - CFG.opps[0].mean) < 0.03);
+  check('相手 1 は反応にばらつきがあり、タイムアウトより前に必ず動く', mx - mn > 0.3 && mx < CFG.grabTimeout);
+
+  const sum2 = document.createElement('h2');
+  sum2.id = 'summary';
+  sum2.textContent = fail === 0 ? 'RESULT: ALL PASS（' + total + ' 件）' : 'RESULT: FAIL（' + fail + ' / ' + total + ' 件 NG）';
+  sum2.className = fail === 0 ? 'ok' : 'ng';
+  out.appendChild(sum2);
+  window.__verifyFail = fail;
+})();
+</script>
+</body>
+</html>
